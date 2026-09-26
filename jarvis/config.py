@@ -36,7 +36,10 @@ class Settings:
     twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
     twilio_phone_number: str = field(default_factory=lambda: _env("TWILIO_PHONE_NUMBER"))
     my_phone_number: str = field(default_factory=lambda: _env("MY_PHONE_NUMBER"))
-    public_base_url: str = field(default_factory=lambda: _env("PUBLIC_BASE_URL").rstrip("/"))
+    # Render sets RENDER_EXTERNAL_URL automatically, so Jarvis finds its own address there.
+    public_base_url: str = field(
+        default_factory=lambda: (_env("PUBLIC_BASE_URL") or _env("RENDER_EXTERNAL_URL")).rstrip("/")
+    )
 
     @property
     def is_local(self) -> bool:

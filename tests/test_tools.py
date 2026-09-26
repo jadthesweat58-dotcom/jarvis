@@ -44,7 +44,7 @@ def test_reminder_fires_and_notifies(ctx):
     past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(timespec="seconds")
     ctx.db.execute("UPDATE reminders SET due_at = ?", (past,))
     assert fire_due_reminders(ctx) == 1
-    assert events == [{"kind": "reminder", "message": "Reminder: Take a break", "id": 1}]
+    assert [(e["kind"], e["message"], e["id"]) for e in events] == [("reminder", "Reminder: Take a break", 1)]
     assert fire_due_reminders(ctx) == 0  # never fires twice
 
 
@@ -151,6 +151,15 @@ def test_computer_tools_stay_inside_root(ctx, tmp_path):
     assert run(ctx, "read_file", path="hello.txt") == "hi there"
     with pytest.raises(ToolError, match="only access files inside"):
         run(ctx, "read_file", path="../../etc/passwd")
+    (tmp_path / ".ssh").mkdir()
+    (tmp_path / ".ssh" / "id_rsa").write_text("secret")
+    (tmp_path / ".env").write_text("KEY=secret")
+    for hidden in (".ssh/id_rsa", ".env", "docs/../.env"):
+        with pytest.raises(ToolError, match="Hidden"):
+            run(ctx, "read_file", path=hidden)
+    assert ".ssh" not in run(ctx, "list_files")
+    for name in ("open_url", "open_app", "run_command", "write_file"):
+        assert REGISTRY[name].requires_approval(ctx, {})
     run(ctx, "write_file", path="docs/new.txt", content="made by jarvis")
     assert (tmp_path / "docs" / "new.txt").read_text() == "made by jarvis"
     assert "Exit code 0" in run(ctx, "run_command", command="echo jarvis-ok") and \

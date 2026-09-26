@@ -63,6 +63,17 @@ def delete_contact(ctx: Context, args: dict) -> str:
     return f"Deleted contact {args['name']}."
 
 
+def _freeze_recipient(ctx: Context, args: dict) -> dict:
+    """Resolve the contact now, so the number shown for approval is the one dialled."""
+    name, number = find_contact(ctx, args.get("who", ""))
+    return {**args, "who": number, "contact_name": name}
+
+
+def _recipient(ctx: Context, args: dict) -> tuple[str, str]:
+    name, number = find_contact(ctx, args["who"])
+    return args.get("contact_name") or name, number
+
+
 def _conversation_note(ctx: Context, wanted: bool) -> str:
     if wanted and not ctx.phone.can_converse:
         return " (Two-way conversation needs PUBLIC_BASE_URL, so the message will just be read out.)"
@@ -106,7 +117,7 @@ def text_me(ctx: Context, args: dict) -> str:
 
 def _summarize_call(ctx: Context, args: dict) -> str:
     try:
-        name, number = find_contact(ctx, args.get("who", ""))
+        name, number = _recipient(ctx, args)
     except ToolError:
         name, number = args.get("who", "?"), "unknown number"
     kind = "Call (two-way)" if args.get("conversation") else "Call"
@@ -128,9 +139,10 @@ def _summarize_call(ctx: Context, args: dict) -> str:
     needs_phone=True,
     needs_approval=True,
     summarize=_summarize_call,
+    prepare=_freeze_recipient,
 )
 def call_contact(ctx: Context, args: dict) -> str:
-    name, number = find_contact(ctx, args["who"])
+    name, number = _recipient(ctx, args)
     wanted = bool(args.get("conversation"))
     intro = f"Hello, this is Jarvis, {ctx.settings.my_name}'s AI assistant, calling with a message. "
     try:
@@ -144,7 +156,7 @@ def call_contact(ctx: Context, args: dict) -> str:
 
 def _summarize_text(ctx: Context, args: dict) -> str:
     try:
-        name, number = find_contact(ctx, args.get("who", ""))
+        name, number = _recipient(ctx, args)
     except ToolError:
         name, number = args.get("who", "?"), "unknown number"
     return f"Text {name} ({number}): \"{args.get('message', '')}\""
@@ -159,9 +171,10 @@ def _summarize_text(ctx: Context, args: dict) -> str:
     needs_phone=True,
     needs_approval=True,
     summarize=_summarize_text,
+    prepare=_freeze_recipient,
 )
 def text_contact(ctx: Context, args: dict) -> str:
-    name, number = find_contact(ctx, args["who"])
+    name, number = _recipient(ctx, args)
     try:
         ctx.phone.text(number, args["message"])
     except PhoneError as exc:

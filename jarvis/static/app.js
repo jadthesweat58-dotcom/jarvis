@@ -264,23 +264,29 @@
   }
   if (voiceOut) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
 
+  let utteranceId = 0;
   function speak(text) {
     return new Promise((resolve) => {
       if (!speakToggle.checked || !voiceOut || !text) return resolve();
       pauseListening();
+      const id = ++utteranceId;
       speechSynthesis.cancel();
       const u = new SpeechSynthesisUtterance(text.replace(/[*_#`>]/g, "").replace(/https?:\/\/\S+/g, "the link"));
       if (voice) u.voice = voice;
       u.rate = 1.03;
       setMode("speaking", "Speaking…");
-      u.onend = u.onerror = () => { setMode("idle"); resumeListening(); resolve(); };
+      u.onend = u.onerror = () => {
+        // cancel() fires the previous utterance's end event; only the newest one counts.
+        if (id === utteranceId) { setMode("idle"); resumeListening(); }
+        resolve();
+      };
       speechSynthesis.speak(u);
     });
   }
 
   // ------------------------------------------------------------------ voice in
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  let rec = null, listening = false, awaitingCommand = false, paused = false;
+  let rec = null, listening = false, awaitingCommand = false, paused = false, awaitTimer = null, failures = 0;
   const wakeOn = () => wakeToggle.checked;
 
   function startRecognition(continuous) {
@@ -297,13 +303,22 @@
     };
     rec.onend = () => {
       listening = false;
-      if (wakeOn() && !paused) setTimeout(() => { if (wakeOn() && !paused && !listening) startRecognition(true); }, 300);
+      // Restart for wake-word mode, backing off if the mic keeps failing.
+      const delay = Math.min(300 * 2 ** failures, 30000);
+      if (wakeOn() && !paused) setTimeout(() => { if (wakeOn() && !paused && !listening) startRecognition(true); }, delay);
       else if (core.mode === "listening") setMode("idle");
     };
+    rec.onresult = ((handler) => (e) => { failures = 0; handler(e); })(rec.onresult);
     rec.onerror = (e) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         setWake(false);
         toast("Microphone access was blocked. Allow it in your browser (Jarvis must be on https or localhost).", true);
+      } else if (e.error === "audio-capture") {
+        setWake(false);
+        toast("No microphone found.", true);
+      } else if (e.error !== "no-speech" && e.error !== "aborted") {
+        failures++;
+        if (failures >= 6) { setWake(false); toast(`Voice recognition keeps failing (${e.error}). Wake word turned off.`, true); }
       }
     };
     try { rec.start(); } catch { return; }
@@ -315,11 +330,13 @@
     rec = null; listening = false;
   }
   function onWakeResult(said) {
-    if (awaitingCommand) { awaitingCommand = false; send(said); return; }
+    if (awaitingCommand) { awaitingCommand = false; clearTimeout(awaitTimer); send(said); return; }
     const m = said.match(/\bjarvis\b[,.!?]?\s*(.*)$/i);
     if (!m) return;
     if (m[1]) { send(m[1]); return; }
     awaitingCommand = true;
+    clearTimeout(awaitTimer);
+    awaitTimer = setTimeout(() => { awaitingCommand = false; }, 10000);  // forget after 10s
     speak("Yes?");
   }
   function pauseListening() { paused = true; if (listening) stopRecognition(); }
@@ -603,7 +620,8 @@
     if (events) events.close();
     events = new EventSource(`/api/events${token ? `?token=${encodeURIComponent(token)}` : ""}`);
     events.onmessage = (e) => {
-      const ev = { ...JSON.parse(e.data), at: new Date().toISOString() };
+      const ev = JSON.parse(e.data);
+      ev.at = ev.at || new Date().toISOString();
       localFeed.unshift(ev);
       unread++; $("bellCount").textContent = String(unread);
       addMsg("system", `🔔 ${ev.message}`);

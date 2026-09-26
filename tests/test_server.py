@@ -9,7 +9,7 @@ from tests.conftest import FakeClaude, response, text, tool_use
 
 def make_client(ctx, claude, host="127.0.0.1"):
     app = create_app(ctx, brain_factory=lambda **kw: Brain(ctx, client=claude, **kw))
-    return TestClient(app, client=(host, 5000))
+    return TestClient(app, base_url="http://localhost", client=(host, 5000))
 
 
 def test_chat_from_localhost_without_token(ctx):
@@ -27,7 +27,22 @@ def test_remote_access_needs_token(ctx):
     assert client.get("/api/status").status_code == 401
     assert client.get("/api/status", headers={"Authorization": "Bearer wrong"}).status_code == 401
     assert client.get("/api/status", headers={"Authorization": "Bearer s3cret"}).status_code == 200
-    assert client.get("/api/status?token=s3cret").status_code == 200
+    # Tokens in URLs end up in logs, so they're only accepted for the event stream.
+    assert client.get("/api/status?token=s3cret").status_code == 401
+
+
+def test_blocks_dns_rebinding_and_cross_site_requests(ctx):
+    client = make_client(ctx, FakeClaude())
+    assert client.get("/api/status").status_code == 200
+    assert client.get("/api/status", headers={"Host": "evil.example"}).status_code == 401
+    assert client.post("/api/reset", headers={"Origin": "https://evil.example"}).status_code == 403
+    assert client.post("/api/reset", headers={"Origin": "http://localhost"}).status_code == 200
+
+
+def test_phone_webhooks_are_off_without_twilio(ctx):
+    client = make_client(ctx, FakeClaude(), host="203.0.113.9")
+    assert client.post("/twilio/voice", data={"From": "+15551112222"}).status_code == 404
+    assert client.post("/twilio/gather?call_id=1", data={"SpeechResult": "hi"}).status_code == 404
 
 
 def test_approval_flow_over_http(phone_ctx, twilio):
@@ -54,7 +69,7 @@ def signed_post(client, ctx, path, form):
 
 def test_two_way_call_with_contact(phone_ctx, twilio):
     ctx = phone_ctx
-    ctx.settings.public_base_url = "http://testserver"
+    ctx.settings.public_base_url = "http://localhost"
     events = []
     ctx.notifier.subscribe(events.append)
     claude = FakeClaude(
@@ -83,7 +98,7 @@ def test_two_way_call_with_contact(phone_ctx, twilio):
 
 def test_inbound_call_from_owner_gets_full_jarvis(phone_ctx):
     ctx = phone_ctx
-    ctx.settings.public_base_url = "http://testserver"
+    ctx.settings.public_base_url = "http://localhost"
     claude = FakeClaude(response(text("You have no reminders today.")))
     client = make_client(ctx, claude)
     r = signed_post(client, ctx, "/twilio/voice", {"From": "+15551112222", "CallSid": "CA9"})
@@ -96,7 +111,28 @@ def test_inbound_call_from_owner_gets_full_jarvis(phone_ctx):
 
 def test_inbound_call_from_stranger_takes_message(phone_ctx):
     ctx = phone_ctx
-    ctx.settings.public_base_url = "http://testserver"
-    client = make_client(ctx, FakeClaude())
+    ctx.settings.public_base_url = "http://localhost"
+    events = []
+    ctx.notifier.subscribe(events.append)
+    claude = FakeClaude(response(text("Got it, I'll pass that on. Goodbye! [HANGUP]")))
+    client = make_client(ctx, claude)
     r = signed_post(client, ctx, "/twilio/voice", {"From": "+15553334444", "CallSid": "CA7"})
     assert "take a message" in r.text
+    call_id = ctx.db.one("SELECT id FROM phone_calls")["id"]
+    r = signed_post(client, ctx, f"/twilio/gather?call_id={call_id}", {"SpeechResult": "It's Bob, call me back"})
+    assert "<Hangup" in r.text
+    assert "It's Bob, call me back" in events[-1]["message"]
+    assert "It's Bob" in ctx.db.one("SELECT body FROM notes")["body"]
+    # A later status webhook (matched by CallSid) doesn't report it twice.
+    signed_post(client, ctx, "/twilio/status", {"CallSid": "CA7", "CallStatus": "completed"})
+    assert len(events) == 1
+
+
+def test_signature_accepts_https_behind_proxy(phone_ctx):
+    ctx = phone_ctx  # PUBLIC_BASE_URL unset; the proxy terminated https
+    client = make_client(ctx, FakeClaude())
+    url = "https://localhost/twilio/voice"
+    form = {"From": "+15553334444", "CallSid": "CA8"}
+    sig = RequestValidator("secret").compute_signature(url, form)
+    r = client.post("/twilio/voice", data=form, headers={"X-Twilio-Signature": sig, "X-Forwarded-Proto": "https"})
+    assert r.status_code == 200 and 'action="https://localhost/twilio/gather' in r.text

@@ -69,7 +69,7 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     main_brain = make_brain(conversation_id="main")
     call_brains: dict[int, Brain] = {}
     feed: deque[dict] = deque(maxlen=30)  # recent notifications, for the live feed
-    ctx.notifier.subscribe(lambda e: feed.appendleft({**e, "at": utcnow()}))
+    ctx.notifier.subscribe(feed.appendleft)
     weather_cache: dict[str, Any] = {}
 
     @asynccontextmanager
@@ -85,28 +85,56 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
     # --- security ----------------------------------------------------------------
+    def host_name(value: str) -> str:
+        """'localhost:8000' -> 'localhost', '[::1]:8000' -> '::1'."""
+        value = value.strip().lower()
+        if value.startswith("["):
+            return value[1:value.find("]")] if "]" in value else value
+        return value.rsplit(":", 1)[0] if value.count(":") == 1 else value
+
     def require_user(request: Request) -> None:
+        # Block cross-site requests: a page on another site must never drive Jarvis.
+        origin = request.headers.get("origin")
+        if origin and origin != "null":
+            if host_name(origin.split("://", 1)[-1]) != host_name(request.headers.get("host", "")):
+                raise HTTPException(403, "Cross-site requests are not allowed.")
         token = ctx.settings.access_token
-        supplied = request.query_params.get("token", "")
+        supplied = ""
         auth = request.headers.get("authorization", "")
         if auth.lower().startswith("bearer "):
             supplied = auth[7:].strip()
+        elif request.url.path == "/api/events":  # EventSource can't send headers
+            supplied = request.query_params.get("token", "")
         if token:
             if supplied and hmac.compare_digest(supplied, token):
                 return
             raise HTTPException(401, "Wrong or missing access token.")
-        host = request.client.host if request.client else ""
-        if host not in LOCAL_HOSTS:
+        # No token set: only this computer may use Jarvis. Checking the Host header
+        # too stops "DNS rebinding" tricks where a website pretends to be localhost.
+        peer = request.client.host if request.client else ""
+        if peer not in LOCAL_HOSTS or host_name(request.headers.get("host", "")) not in LOCAL_HOSTS:
             raise HTTPException(401, "Set JARVIS_ACCESS_TOKEN to use Jarvis from other devices.")
 
+    def external_base(request: Request) -> str:
+        """The https address Twilio uses to reach us."""
+        if ctx.settings.public_base_url:
+            return ctx.settings.public_base_url
+        scheme = request.headers.get("x-forwarded-proto", request.url.scheme).split(",")[0].strip()
+        return f"{scheme}://{request.headers.get('host', request.url.netloc)}"
+
     async def twilio_form(request: Request) -> dict[str, str]:
+        # Phone webhooks only exist when Twilio is set up, and every request must
+        # carry a valid Twilio signature (made with your secret auth token).
+        if not (ctx.settings.twilio_enabled and ctx.settings.twilio_auth_token):
+            raise HTTPException(404, "Phone features aren't set up.")
         form = {k: str(v) for k, v in (await request.form()).items()}
-        if ctx.settings.twilio_auth_token:
-            base = ctx.settings.public_base_url or str(request.base_url).rstrip("/")
-            url = base + request.url.path + (f"?{request.url.query}" if request.url.query else "")
-            signature = request.headers.get("x-twilio-signature", "")
-            if not RequestValidator(ctx.settings.twilio_auth_token).validate(url, form, signature):
-                raise HTTPException(403, "Invalid Twilio signature.")
+        suffix = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        candidates = {external_base(request), str(request.base_url).rstrip("/")}
+        candidates |= {c.replace("http://", "https://", 1) for c in candidates}
+        signature = request.headers.get("x-twilio-signature", "")
+        validator = RequestValidator(ctx.settings.twilio_auth_token)
+        if not any(validator.validate(base + suffix, form, signature) for base in candidates):
+            raise HTTPException(403, "Invalid Twilio signature.")
         return form
 
     def run_chat(brain: Brain, text: str) -> dict[str, Any]:
@@ -256,15 +284,12 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
                                  headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
     # --- phone calls (Twilio webhooks) ---------------------------------------------
-    def base_url(request: Request) -> str:
-        return ctx.settings.public_base_url or str(request.base_url).rstrip("/")
-
     def listen(vr: VoiceResponse, request: Request, call_id: int) -> VoiceResponse:
-        gather = Gather(input="speech", action=f"{base_url(request)}/twilio/gather?call_id={call_id}",
+        gather = Gather(input="speech", action=f"{external_base(request)}/twilio/gather?call_id={call_id}",
                         method="POST", speech_timeout="auto", language="en-US")
         vr.append(gather)
-        say(vr, "I didn't hear anything, so I'll hang up now. Goodbye.")
-        vr.hangup()
+        # Reached only if the caller says nothing: wrap the call up.
+        vr.redirect(f"{external_base(request)}/twilio/gather?call_id={call_id}&silent=1", method="POST")
         return vr
 
     def twiml(vr: VoiceResponse) -> Response:
@@ -334,6 +359,11 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             return twiml(vr)
         speech = form.get("SpeechResult", "").strip()
         if not speech:
+            if request.query_params.get("silent"):
+                say(vr, "I didn't hear anything, so I'll hang up now. Goodbye.")
+                vr.hangup()
+                finish_call(call_id, "completed")
+                return twiml(vr)
             say(vr, "Sorry, I didn't catch that.")
             return twiml(listen(vr, request, call_id))
         add_transcript(call_id, "Caller", speech)
@@ -353,32 +383,45 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
         say(vr, answer)
         if done:
             vr.hangup()
+            finish_call(call_id, "completed")
             return twiml(vr)
         return twiml(listen(vr, request, call_id))
 
     @app.post("/twilio/status")
     async def twilio_status(request: Request) -> Response:
         form = await twilio_form(request)
-        call_id = int(request.query_params.get("call_id", "0"))
         status = form.get("CallStatus", "")
-        call = ctx.db.one("SELECT * FROM phone_calls WHERE id = ?", (call_id,))
-        if call and status:
-            ctx.db.execute("UPDATE phone_calls SET status = ? WHERE id = ?", (status, call_id))
-            finish_call(call, status)
+        call_id = request.query_params.get("call_id")
+        if call_id:
+            call = ctx.db.one("SELECT id FROM phone_calls WHERE id = ?", (int(call_id),))
+        else:  # a status webhook configured on the Twilio number itself
+            call = ctx.db.one("SELECT id FROM phone_calls WHERE call_sid = ?", (form.get("CallSid", ""),))
+        if call and status in ("completed", "busy", "no-answer", "failed", "canceled"):
+            finish_call(call["id"], status)
         return Response(status_code=204)
 
-    def finish_call(call: dict, status: str) -> None:
-        call_brains.pop(call["id"], None)
+    def finish_call(call_id: int, status: str) -> None:
+        """Report how a call went. Runs once per call, however many webhooks arrive."""
+        call_brains.pop(call_id, None)
+        if not ctx.db.execute(
+            "UPDATE phone_calls SET status = ? WHERE id = ? AND status NOT LIKE 'done:%'",
+            (f"done:{status}", call_id),
+        ):
+            return
+        call = ctx.db.one("SELECT * FROM phone_calls WHERE id = ?", (call_id,))
         who = call["contact_name"] or call["number"]
-        if status in ("busy", "no-answer", "failed", "canceled"):
+        if status != "completed":
             if not call["with_owner"]:
                 ctx.notifier.publish("call", f"{who} didn't pick up ({status}).")
             return
-        if status != "completed" or call["with_owner"]:
+        if call["with_owner"]:
             return
         lines = json.loads(call["transcript"])
         if not any(line["speaker"] == "Caller" for line in lines):
-            ctx.notifier.publish("call", f"Call to {who} finished; I delivered the message.")
+            if call["direction"] == "inbound":
+                ctx.notifier.publish("call", f"Missed call from {who}; they didn't leave a message.")
+            else:
+                ctx.notifier.publish("call", f"Call to {who} finished; I delivered the message.")
             return
         transcript = "\n".join(f"{line['speaker']}: {line['text']}" for line in lines)
         title = f"Phone call with {who} ({datetime.now(ctx.settings.tz):%d %b %H:%M})"

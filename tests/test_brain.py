@@ -126,3 +126,36 @@ def test_real_sdk_blocks_are_replayed_with_api_field_names(ctx):
     assert replayed[1] == {"type": "thinking", "thinking": "", "signature": "sig"}
     assert replayed[2]["input"] == {"task": "Buy milk"}
     assert "Buy milk" in ctx.db.one("SELECT task FROM todos")["task"]
+
+
+def test_cut_off_tool_call_is_not_left_dangling(ctx):
+    claude = FakeClaude(
+        response(text("Let me"), tool_use("add_todo", {"task": "x"}), stop_reason="max_tokens"),
+        response(text("Sorry, go on.")),
+    )
+    brain = Brain(ctx, client=claude)
+    brain.chat("add a todo")
+    assert all(b["type"] != "tool_use" for b in brain.messages[-1]["content"])
+    brain.chat("again")  # the next request has a valid history
+    assert ctx.db.one("SELECT COUNT(*) AS n FROM todos")["n"] == 0
+
+
+def test_older_models_skip_adaptive_thinking(ctx):
+    ctx.settings.model = "claude-haiku-4-5"
+    claude = FakeClaude(response(text("Hi.")))
+    Brain(ctx, client=claude).chat("hi")
+    req = claude.requests[0]
+    assert "thinking" not in req and "output_config" not in req and "fallbacks" not in req
+    assert any(t.get("type") == "web_search_20250305" for t in req["tools"])
+
+
+def test_approved_call_dials_the_number_shown(phone_ctx, twilio):
+    ctx = phone_ctx
+    ctx.db.execute("INSERT INTO contacts (name, phone, created_at) VALUES ('Mom', '+15550001111', 'x')")
+    claude = FakeClaude(response(tool_use("call_contact", {"who": "Mom", "message": "hi"})), response(text("OK.")))
+    reply = Brain(ctx, client=claude).chat("call mom")
+    # The contact's number changes before the user approves...
+    ctx.db.execute("UPDATE contacts SET phone = '+15559999999' WHERE name = 'Mom'")
+    resolve_action(ctx, reply.actions[0]["id"], approve=True)
+    assert twilio.calls_made[0]["to"] == "+15550001111"
+    assert "Mom" in reply.actions[0]["summary"] and "+15550001111" in reply.actions[0]["summary"]

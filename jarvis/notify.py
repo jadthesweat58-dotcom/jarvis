@@ -4,6 +4,7 @@ call summaries) to whoever is listening: the web UI, the terminal, etc."""
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 from typing import Callable
 
 Event = dict
@@ -27,7 +28,8 @@ class Notifier:
         return unsubscribe
 
     def publish(self, kind: str, message: str, **extra) -> None:
-        event = {"kind": kind, "message": message, **extra}
+        at = datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+        event = {"kind": kind, "message": message, "at": at, **extra}
         with self._lock:
             subscribers = list(self._subscribers)
         for callback in subscribers:

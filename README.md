@@ -39,13 +39,14 @@ Jarvis ships as a Docker app, so it runs on any host. The easiest is **Render**:
    - `TIMEZONE`: e.g. `America/New_York`, `Europe/London`, `Asia/Karachi`
    - `HOME_CITY`: e.g. `London, UK` (for weather)
    - Twilio values and `MY_PHONE_NUMBER` (optional; format `+15551234567`)
-   - `PUBLIC_BASE_URL`: your Render address, e.g. `https://jarvis-xxxx.onrender.com`
-     (fill this in after the first deploy; it's needed for two-way phone conversations)
+   - `PUBLIC_BASE_URL`: leave empty on Render (Jarvis detects its address automatically).
+     On other hosts set it to your https address, e.g. `https://my-jarvis.example.com`.
 4. Deploy. Open your Render URL, and when asked for the **access token**, copy
    `JARVIS_ACCESS_TOKEN` from the service's *Environment* tab (Render generated it for you).
 
 **Other hosts** (Railway, Fly.io, a VPS…): deploy the `Dockerfile`, set the same environment
-variables (see `.env.example`), set a strong `JARVIS_ACCESS_TOKEN`, and mount a volume at `/data`.
+variables (see `.env.example`), set a strong `JARVIS_ACCESS_TOKEN`, set `PUBLIC_BASE_URL`, and
+mount a volume at `/data`.
 
 ### Let people phone Jarvis (optional)
 In the Twilio console → Phone Numbers → your number → **Voice → "A call comes in"** → Webhook →
@@ -97,7 +98,11 @@ See `.env.example` for all of them. The main ones:
 - Twilio webhooks are verified with your Twilio auth token, so strangers can't fake them.
 - Caller ID can be spoofed. Calls "from your number" get full Jarvis, but calling or texting
   others still requires approval in the web app.
-- Computer control is off in the cloud and every command/file write needs your approval.
+- Computer control is off in the cloud. On your computer, opening apps/websites, running
+  commands and writing files all need your approval, and hidden files (`.ssh`, `.env`, …) are
+  off limits.
+- Without an access token, Jarvis only answers requests from this computer's own browser
+  (other websites can't talk to it).
 
 ## How it's built
 

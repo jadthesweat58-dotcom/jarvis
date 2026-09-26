@@ -30,6 +30,8 @@ MAX_HISTORY_MESSAGES = 120
 MODERN_WEB_SEARCH = ("claude-opus-5", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-8",
                      "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6")
 FALLBACK_MODELS = ("claude-opus-5", "claude-fable-5-1")
+# Models that take adaptive thinking and an effort level (older ones, e.g. Haiku 4.5, don't).
+ADAPTIVE_MODELS = MODERN_WEB_SEARCH
 
 # approver(tool, args, summary) -> True to run the tool, False to decline.
 Approver = Callable[[Tool, dict, str], bool]
@@ -166,9 +168,10 @@ class Brain:
             "system": self.system_prompt,
             "messages": self.messages,
             "tools": self._tool_definitions(),
-            "thinking": {"type": "adaptive"},
-            "output_config": {"effort": self.effort},
         }
+        if self.settings.model.startswith(ADAPTIVE_MODELS):
+            params["thinking"] = {"type": "adaptive"}
+            params["output_config"] = {"effort": self.effort}
         if self.settings.model.startswith(FALLBACK_MODELS):
             # If the model declines, let the API retry on its recommended fallback model.
             params["betas"] = ["server-side-fallback-2026-07-01"]
@@ -188,13 +191,21 @@ class Brain:
                 if response.stop_reason == "refusal":
                     del self.messages[checkpoint:]
                     return Reply("I'm afraid I can't help with that one.", actions)
-                self.messages.append({"role": "assistant", "content": [to_dict(b) for b in response.content]})
+                tool_uses = [b for b in response.content if b.type == "tool_use"]
+                finished = response.stop_reason not in ("tool_use", "pause_turn") or (
+                    response.stop_reason == "tool_use" and not tool_uses)
+                content = response.content
+                if finished:
+                    # A reply cut off mid tool call (e.g. max_tokens) must not leave an
+                    # unanswered tool_use in the history, or every later request fails.
+                    content = [b for b in content if b.type != "tool_use"]
+                self.messages.append({"role": "assistant", "content": [to_dict(b) for b in content]
+                                      or [{"type": "text", "text": "(no reply)"}]})
                 if response.stop_reason == "pause_turn":
                     continue  # server-side web search paused; re-send to let it resume
-                tool_uses = [b for b in response.content if b.type == "tool_use"]
-                if response.stop_reason != "tool_use" or not tool_uses:
+                if finished:
                     self._save()
-                    return Reply(self._text_of(response.content), actions)
+                    return Reply(self._text_of(content), actions)
                 results = [self._run_tool(b, actions) for b in tool_uses]
                 self.messages.append({"role": "user", "content": results})
             self._save()
@@ -216,6 +227,8 @@ class Brain:
             if tool is None:
                 raise ToolError(f"Unknown tool {block.name}.")
             if tool.requires_approval(self.ctx, args):
+                if tool.prepare:
+                    args = tool.prepare(self.ctx, args)  # freeze details, e.g. the exact number
                 summary = tool.describe(self.ctx, args)
                 if self.approver is not None:
                     output = tool.handler(self.ctx, args) if self.approver(tool, args, summary) \

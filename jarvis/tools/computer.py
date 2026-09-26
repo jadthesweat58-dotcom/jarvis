@@ -26,6 +26,9 @@ def safe_path(ctx: Context, path: str) -> Path:
     full = (raw if raw.is_absolute() else root / raw).resolve()
     if full != root and root not in full.parents:
         raise ToolError(f"I can only access files inside {root}.")
+    # Hidden files and folders (.ssh, .aws, .env, …) hold passwords and keys: off limits.
+    if any(part.startswith(".") for part in full.relative_to(root).parts):
+        raise ToolError("Hidden files and folders are off limits.")
     return full
 
 
@@ -35,10 +38,12 @@ def clip(text: str) -> str:
 
 @tool(
     "open_url",
-    "Open a web page in the user's browser.",
+    "Open a web page in the user's browser. The user approves it in the app.",
     {"url": {"type": "string"}},
     ["url"],
     local_only=True,
+    needs_approval=True,
+    summarize=lambda ctx, a: f"Open in your browser: {a.get('url', '')}",
 )
 def open_url(ctx: Context, args: dict) -> str:
     url = args["url"].strip()
@@ -50,10 +55,13 @@ def open_url(ctx: Context, args: dict) -> str:
 
 @tool(
     "open_app",
-    "Launch an application on the user's computer by name, e.g. 'Spotify', 'Calculator', 'notepad'.",
+    "Launch an application on the user's computer by name, e.g. 'Spotify', 'Calculator', "
+    "'notepad'. The user approves it in the app.",
     {"name": {"type": "string"}},
     ["name"],
     local_only=True,
+    needs_approval=True,
+    summarize=lambda ctx, a: f"Open the app: {a.get('name', '')}",
 )
 def open_app(ctx: Context, args: dict) -> str:
     name = args["name"].strip()

@@ -40,6 +40,9 @@ class Tool:
     needs_approval: bool | Callable[[Context, dict], bool] = False
     # One-line description of the action shown to the user when approval is needed.
     summarize: Callable[[Context, dict], str] | None = None
+    # Optional: settle details before asking for approval, so the user approves
+    # exactly what will run (e.g. turn a contact name into the phone number).
+    prepare: Callable[[Context, dict], dict] | None = None
     local_only: bool = False
     needs_phone: bool = False
 
