@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>J.A.R.V.I.S.</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='none' stroke='%2300d8ff' stroke-width='10'/><circle cx='50' cy='50' r='15' fill='%2300d8ff'/></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="brand">J.A.R.V.I.S.</div>
+      <div class="status" id="status">connecting…</div>
+    </header>
+
+    <main>
+      <section class="core">
+        <button class="reactor" id="reactor" title="Tap to talk" aria-label="Tap to talk">
+          <span class="ring r1"></span><span class="ring r2"></span><span class="ring r3"></span>
+          <span class="center"></span>
+        </button>
+        <div class="state" id="state">Tap the reactor or type below</div>
+        <div class="toggles">
+          <label><input type="checkbox" id="wake"> "Hey Jarvis" mode</label>
+          <label><input type="checkbox" id="speak" checked> Speak replies</label>
+          <button class="link" id="reset" type="button">New conversation</button>
+        </div>
+      </section>
+
+      <section class="chat">
+        <div class="log" id="log" aria-live="polite"></div>
+        <form class="input" id="form">
+          <input id="text" autocomplete="off" placeholder="Ask Jarvis anything…">
+          <button type="button" id="mic" class="mic" title="Talk" aria-label="Talk">🎙</button>
+          <button type="submit">Send</button>
+        </form>
+      </section>
+
+      <aside class="panel">
+        <h3>Awaiting approval</h3>
+        <ul id="actions"><li class="muted">Nothing pending</li></ul>
+        <h3>Reminders</h3>
+        <ul id="reminders"><li class="muted">None</li></ul>
+        <h3>To-do</h3>
+        <ul id="todos"><li class="muted">All clear</li></ul>
+        <p class="muted small" id="facts"></p>
+      </aside>
+    </main>
+  </div>
+
+  <dialog id="login">
+    <form method="dialog" id="loginForm">
+      <h2>Access token</h2>
+      <p>Enter the <code>JARVIS_ACCESS_TOKEN</code> from your server's settings.</p>
+      <input id="token" type="password" autocomplete="current-password" required>
+      <button type="submit">Unlock</button>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
