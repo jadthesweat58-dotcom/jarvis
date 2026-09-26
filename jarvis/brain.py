@@ -82,7 +82,7 @@ get around a declined action."""
 
 
 def to_dict(block: Any) -> dict:
-    return block if isinstance(block, dict) else block.model_dump(mode="json", exclude_none=True)
+    return block if isinstance(block, dict) else block.model_dump(mode="json", exclude_none=True, by_alias=True)
 
 
 class Brain:
@@ -128,7 +128,7 @@ class Brain:
     def _client(self):
         if self.client is None:
             if not self.settings.anthropic_api_key:
-                raise RuntimeError("ANTHROPIC_API_KEY is not set. Add it to your .env file.")
+                raise RuntimeError("ANTHROPIC_API_KEY is not set. Add it to your .env file (or your cloud host's environment settings).")
             self.client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key)
         return self.client
 

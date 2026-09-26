@@ -1,0 +1,37 @@
+# One-click deploy on Render (https://render.com): New > Blueprint > pick this repo.
+# You'll be asked for the secret values marked sync: false.
+services:
+  - type: web
+    name: jarvis
+    runtime: docker
+    plan: starter            # a paid plan is needed for the persistent disk below
+    healthCheckPath: /healthz
+    disk:
+      name: jarvis-data
+      mountPath: /data       # Jarvis's memory database lives here
+      sizeGB: 1
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: JARVIS_ACCESS_TOKEN
+        generateValue: true  # Render creates a strong password; copy it from the dashboard
+      - key: MY_NAME
+        sync: false
+      - key: TIMEZONE
+        sync: false
+      - key: HOME_CITY
+        sync: false
+      - key: JARVIS_MODEL
+        value: claude-opus-5
+      - key: JARVIS_EFFORT
+        value: medium
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_PHONE_NUMBER
+        sync: false
+      - key: MY_PHONE_NUMBER
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false

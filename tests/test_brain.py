@@ -99,3 +99,30 @@ def test_pause_turn_resumes(ctx):
     claude = FakeClaude(response(text("Searching…"), stop_reason="pause_turn"), response(text("Found it.")))
     assert Brain(ctx, client=claude).chat("search").text == "Found it."
     assert len(claude.requests) == 2
+
+
+def real_message(content, stop_reason):
+    from anthropic.types.beta import BetaMessage
+
+    return BetaMessage.model_validate({
+        "id": "msg_1", "type": "message", "role": "assistant", "model": "claude-opus-5",
+        "content": content, "stop_reason": stop_reason, "stop_sequence": None,
+        "usage": {"input_tokens": 10, "output_tokens": 5},
+    })
+
+
+def test_real_sdk_blocks_are_replayed_with_api_field_names(ctx):
+    first = real_message([
+        {"type": "fallback", "from": {"model": "claude-opus-5"}, "to": {"model": "claude-opus-4-8"},
+         "trigger": {"type": "refusal", "category": "cyber"}},
+        {"type": "thinking", "thinking": "", "signature": "sig"},
+        {"type": "tool_use", "id": "toolu_1", "name": "add_todo", "input": {"task": "Buy milk"}},
+    ], "tool_use")
+    second = real_message([{"type": "text", "text": "Added.", "citations": None}], "end_turn")
+    claude = FakeClaude(first, second)
+    assert Brain(ctx, client=claude).chat("add milk").text == "Added."
+    replayed = claude.requests[1]["messages"][1]["content"]
+    assert replayed[0]["from"] == {"model": "claude-opus-5"} and "from_" not in replayed[0]
+    assert replayed[1] == {"type": "thinking", "thinking": "", "signature": "sig"}
+    assert replayed[2]["input"] == {"task": "Buy milk"}
+    assert "Buy milk" in ctx.db.one("SELECT task FROM todos")["task"]

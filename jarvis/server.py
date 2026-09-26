@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import time
+from collections import deque
 import json
 import logging
 import re
@@ -27,7 +29,8 @@ from jarvis.brain import Brain, resolve_action
 from jarvis.db import utcnow
 from jarvis.phone import say
 from jarvis.scheduler import ReminderLoop
-from jarvis.tools import Context, ToolError
+from jarvis.tools import Context, ToolError, available_tools
+from jarvis.tools.web import fetch_weather
 
 log = logging.getLogger("jarvis.server")
 STATIC = Path(__file__).parent / "static"
@@ -65,6 +68,9 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     make_brain = brain_factory or (lambda **kw: Brain(ctx, **kw))
     main_brain = make_brain(conversation_id="main")
     call_brains: dict[int, Brain] = {}
+    feed: deque[dict] = deque(maxlen=30)  # recent notifications, for the live feed
+    ctx.notifier.subscribe(lambda e: feed.appendleft({**e, "at": utcnow()}))
+    weather_cache: dict[str, Any] = {}
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -112,6 +118,10 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
         return {"reply": reply.text, "actions": reply.actions}
 
     # --- browser app -------------------------------------------------------------
+    @app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        return {"status": "ok"}
+
     @app.get("/")
     def index() -> FileResponse:
         return FileResponse(STATIC / "index.html")
@@ -120,7 +130,9 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     def status() -> dict[str, Any]:
         s = ctx.settings
         return {"name": s.my_name, "mode": s.mode, "model": s.model,
-                "phone": s.twilio_enabled, "computer_control": s.is_local}
+                "phone": s.twilio_enabled, "computer_control": s.is_local,
+                "two_way_calls": s.twilio_enabled and bool(s.public_base_url),
+                "claude": bool(s.anthropic_api_key), "home_city": s.home_city, "timezone": s.timezone}
 
     @app.post("/api/chat", dependencies=[Depends(require_user)])
     def chat(body: ChatIn) -> dict[str, Any]:
@@ -150,13 +162,77 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             "SELECT id, message, due_at FROM reminders WHERE status = 'pending' ORDER BY due_at LIMIT 10")
         for r in reminders:
             r["due_local"] = datetime.fromisoformat(r["due_at"]).astimezone(tz).strftime("%a %H:%M")
+        count = lambda sql: ctx.db.one(sql)["n"]  # noqa: E731
+        blocks = [b for m in main_brain.messages if isinstance(m.get("content"), list) for b in m["content"]]
         return {
             "reminders": reminders,
             "todos": ctx.db.query("SELECT id, task, due FROM todos WHERE done = 0 ORDER BY id LIMIT 10"),
             "actions": ctx.db.query(
                 "SELECT id, summary FROM pending_actions WHERE status = 'pending' ORDER BY id"),
-            "facts": ctx.db.one("SELECT COUNT(*) AS n FROM facts")["n"],
+            "facts": count("SELECT COUNT(*) AS n FROM facts"),
+            "counts": {
+                "facts": count("SELECT COUNT(*) AS n FROM facts"),
+                "notes": count("SELECT COUNT(*) AS n FROM notes"),
+                "todos": count("SELECT COUNT(*) AS n FROM todos WHERE done = 0"),
+                "reminders": count("SELECT COUNT(*) AS n FROM reminders WHERE status = 'pending'"),
+                "contacts": count("SELECT COUNT(*) AS n FROM contacts"),
+                "calls": count("SELECT COUNT(*) AS n FROM phone_calls"),
+                "turns": sum(1 for m in main_brain.messages if m["role"] == "user"
+                             and any(b.get("type") == "text" for b in m["content"])),
+                "tool_calls": sum(1 for b in blocks if b.get("type") in ("tool_use", "server_tool_use")),
+                "tools": len(available_tools(ctx.settings)) + 1,  # +1 for web search
+            },
+            "system": system_stats(),
+            "feed": list(feed),
         }
+
+    def system_stats() -> dict[str, float]:
+        try:
+            import psutil
+
+            return {
+                "cpu": psutil.cpu_percent(interval=None),
+                "ram": psutil.virtual_memory().percent,
+                "disk": psutil.disk_usage(str(ctx.settings.data_dir.resolve().anchor or "/")).percent,
+            }
+        except Exception:
+            return {}
+
+    @app.get("/api/list/{kind}", dependencies=[Depends(require_user)])
+    def list_items(kind: str) -> list[dict[str, Any]]:
+        queries = {
+            "facts": "SELECT id, fact AS title, category AS detail FROM facts ORDER BY id DESC",
+            "notes": "SELECT id, title, body AS detail FROM notes ORDER BY id DESC LIMIT 100",
+            "todos": "SELECT id, task AS title, COALESCE(due, '') AS detail, done FROM todos ORDER BY done, id DESC LIMIT 100",
+            "reminders": "SELECT id, message AS title, due_at AS detail, status FROM reminders ORDER BY due_at DESC LIMIT 100",
+            "contacts": "SELECT id, name AS title, phone || ' ' || relationship AS detail FROM contacts ORDER BY name",
+            "calls": "SELECT id, contact_name AS title, direction || ' · ' || status || ' · ' || created_at AS detail FROM phone_calls ORDER BY id DESC LIMIT 50",
+        }
+        if kind == "tools":
+            tools = [{"id": i, "title": t.name, "detail": t.description} for i, t in enumerate(available_tools(ctx.settings))]
+            return tools + [{"id": len(tools), "title": "web_search", "detail": "Search the web (built into Claude)."}]
+        if kind not in queries:
+            raise HTTPException(404, "Unknown list.")
+        rows = ctx.db.query(queries[kind])
+        if kind == "reminders":
+            for r in rows:
+                r["detail"] = datetime.fromisoformat(r["detail"]).astimezone(ctx.settings.tz).strftime("%a %d %b %H:%M") + f" · {r['status']}"
+        return rows
+
+    @app.get("/api/weather", dependencies=[Depends(require_user)])
+    def weather() -> dict[str, Any]:
+        city = ctx.settings.home_city
+        if not city:
+            return {"available": False, "reason": "Set HOME_CITY in .env"}
+        cached = weather_cache.get(city)
+        if cached and time.time() - cached[0] < 600:
+            return cached[1]
+        try:
+            data = {"available": True, **fetch_weather(city)}
+        except Exception as exc:
+            data = {"available": False, "reason": str(exc)}
+        weather_cache[city] = (time.time(), data)
+        return data
 
     @app.get("/api/events", dependencies=[Depends(require_user)])
     async def events(request: Request) -> StreamingResponse:

@@ -39,20 +39,8 @@ def geocode(location: str) -> dict:
     return results[0]
 
 
-@tool(
-    "get_weather",
-    "Current weather and a 3-day forecast for a place. If the user doesn't say "
-    "where, use their home city.",
-    {
-        "location": {"type": "string", "description": "City, optionally with country: 'Paris, France'."},
-        "units": {"type": "string", "enum": ["celsius", "fahrenheit"]},
-    },
-)
-def get_weather(ctx: Context, args: dict) -> str:
-    location = (args.get("location") or ctx.settings.home_city).strip()
-    if not location:
-        raise ToolError("No location given and no HOME_CITY is configured; ask the user where.")
-    units = args.get("units") or "celsius"
+def fetch_weather(location: str, units: str = "celsius") -> dict:
+    """Current conditions plus a 3-day forecast, as plain data."""
     place = geocode(location)
     resp = httpx.get(
         "https://api.open-meteo.com/v1/forecast",
@@ -69,20 +57,48 @@ def get_weather(ctx: Context, args: dict) -> str:
     )
     resp.raise_for_status()
     data = resp.json()
-    unit = "°F" if units == "fahrenheit" else "°C"
-    cur = data["current"]
-    name = ", ".join(p for p in (place.get("name"), place.get("admin1"), place.get("country")) if p)
+    cur, daily = data["current"], data["daily"]
+    return {
+        "place": ", ".join(p for p in (place.get("name"), place.get("admin1"), place.get("country")) if p),
+        "unit": "°F" if units == "fahrenheit" else "°C",
+        "temperature": cur["temperature_2m"],
+        "feels_like": cur["apparent_temperature"],
+        "humidity": cur["relative_humidity_2m"],
+        "wind": cur["wind_speed_10m"],
+        "summary": WEATHER_CODES.get(cur["weather_code"], "unknown"),
+        "days": [
+            {
+                "date": day,
+                "summary": WEATHER_CODES.get(daily["weather_code"][i], "unknown"),
+                "low": daily["temperature_2m_min"][i],
+                "high": daily["temperature_2m_max"][i],
+                "rain_chance": daily["precipitation_probability_max"][i],
+            }
+            for i, day in enumerate(daily["time"])
+        ],
+    }
+
+
+@tool(
+    "get_weather",
+    "Current weather and a 3-day forecast for a place. If the user doesn't say "
+    "where, use their home city.",
+    {
+        "location": {"type": "string", "description": "City, optionally with country: 'Paris, France'."},
+        "units": {"type": "string", "enum": ["celsius", "fahrenheit"]},
+    },
+)
+def get_weather(ctx: Context, args: dict) -> str:
+    location = (args.get("location") or ctx.settings.home_city).strip()
+    if not location:
+        raise ToolError("No location given and no HOME_CITY is configured; ask the user where.")
+    w = fetch_weather(location, args.get("units") or "celsius")
+    u = w["unit"]
     lines = [
-        f"Weather in {name}:",
-        f"Now: {cur['temperature_2m']}{unit} (feels like {cur['apparent_temperature']}{unit}), "
-        f"{WEATHER_CODES.get(cur['weather_code'], 'unknown')}, humidity {cur['relative_humidity_2m']}%, "
-        f"wind {cur['wind_speed_10m']} km/h.",
+        f"Weather in {w['place']}:",
+        f"Now: {w['temperature']}{u} (feels like {w['feels_like']}{u}), {w['summary']}, "
+        f"humidity {w['humidity']}%, wind {w['wind']} km/h.",
     ]
-    daily = data["daily"]
-    for i, day in enumerate(daily["time"]):
-        lines.append(
-            f"{day}: {WEATHER_CODES.get(daily['weather_code'][i], 'unknown')}, "
-            f"{daily['temperature_2m_min'][i]}–{daily['temperature_2m_max'][i]}{unit}, "
-            f"{daily['precipitation_probability_max'][i]}% chance of rain."
-        )
+    for d in w["days"]:
+        lines.append(f"{d['date']}: {d['summary']}, {d['low']}–{d['high']}{u}, {d['rain_chance']}% chance of rain.")
     return "\n".join(lines)
