@@ -199,6 +199,25 @@
   }
   $("screenBtn").onclick = toggleScreen;
 
+  // ------------------------------------------------------------------ daily briefing
+  async function playBriefing() {
+    const btn = $("briefBtn");
+    btn.disabled = true;
+    setMode("thinking", "Putting your briefing together…");
+    try {
+      const { text } = await api("/api/briefing", {});
+      addMsg("jarvis", text);
+      live("");
+      await speak(text);
+    } catch (e) {
+      if (e.message !== "locked") toast(e.message, true);
+    } finally {
+      btn.disabled = false;
+      if (core.mode === "thinking") setMode("idle");
+    }
+  }
+  $("briefBtn").onclick = playBriefing;
+
   async function send(text) {
     text = (text || "").trim();
     if (!text) return;
@@ -658,8 +677,13 @@
       ev.at = ev.at || new Date().toISOString();
       events.unshift(ev);
       unread++; $("bellCount").textContent = String(unread);
-      addMsg("system", `🔔 ${ev.message}`);
-      toast(`🔔 ${ev.message}`);
+      if (ev.kind === "briefing") {  // the morning briefing: show it as Jarvis speaking
+        addMsg("jarvis", ev.message);
+        toast("🌅 Your morning briefing is here.");
+      } else {
+        addMsg("system", `🔔 ${ev.message}`);
+        toast(`🔔 ${ev.message}`);
+      }
       if ("Notification" in window && Notification.permission === "granted" && document.hidden) new Notification("Jarvis", { body: ev.message });
       if (!busy) speak(ev.message);
       refresh();

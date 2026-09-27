@@ -34,6 +34,8 @@ class Settings:
     model: str = field(default_factory=lambda: _env("JARVIS_MODEL"))
     effort: str = field(default_factory=lambda: _env("JARVIS_EFFORT", "medium"))
     access_token: str = field(default_factory=lambda: _env("JARVIS_ACCESS_TOKEN"))
+    # Morning briefing time (local, HH:MM), or "off".
+    briefing_time: str = field(default_factory=lambda: _env("BRIEFING_TIME", "07:30").lower())
     # Optional online database so memory survives on free hosting: a Postgres
     # connection string (e.g. Supabase), or a Turso database (https://turso.tech).
     database_url: str = field(default_factory=lambda: _env("DATABASE_URL"))

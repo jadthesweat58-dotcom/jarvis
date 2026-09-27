@@ -29,7 +29,7 @@ def pg_url(tmp_path_factory):
 def pg(pg_url):
     db = PostgresDatabase(pg_url)
     for table in ("facts", "notes", "todos", "reminders", "contacts", "conversations",
-                  "pending_actions", "phone_calls"):
+                  "pending_actions", "phone_calls", "kv"):
         db.execute(f"DELETE FROM {table}")
     return db
 
@@ -90,3 +90,10 @@ def test_reminders_and_approvals_on_postgres(pg, settings, twilio):
     assert "Added to-do" in result
     with pytest.raises(ToolError):
         resolve_action(ctx, action, approve=True)
+
+
+def test_key_value_state_on_postgres(pg):
+    assert pg.get_kv("last_briefing") == ""
+    pg.set_kv("last_briefing", "2026-09-27")
+    pg.set_kv("last_briefing", "2026-09-28")
+    assert pg.get_kv("last_briefing") == "2026-09-28"

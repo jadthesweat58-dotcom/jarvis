@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import threading
 import time
 from collections import deque
 import json
@@ -24,6 +25,7 @@ from pydantic import BaseModel
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
+from jarvis import briefing
 from jarvis.app import build_context
 from jarvis.brain import Brain, create_brain, resolve_action
 from jarvis.db import utcnow
@@ -112,7 +114,11 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        loop = ReminderLoop(ctx)
+        def morning_briefing() -> None:
+            # Composing takes a few seconds (AI + web search): don't hold up reminders.
+            threading.Thread(target=briefing.send_if_due, args=(ctx, make_brain), daemon=True).start()
+
+        loop = ReminderLoop(ctx, on_tick=morning_briefing)
         loop.start()
         if not ctx.settings.access_token:
             log.warning("JARVIS_ACCESS_TOKEN is not set: only this computer (localhost) can use Jarvis.")
@@ -294,6 +300,14 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     @app.get("/api/system", dependencies=[Depends(require_user)])
     def system() -> dict[str, float]:
         return system_stats()
+
+    @app.post("/api/briefing", dependencies=[Depends(require_user)])
+    def get_briefing() -> dict[str, str]:
+        try:
+            return {"text": briefing.compose(ctx, make_brain)}
+        except Exception as exc:
+            log.exception("Briefing failed")
+            raise HTTPException(500, f"Couldn't put the briefing together: {exc}") from exc
 
     @app.post("/api/tts", dependencies=[Depends(require_user)])
     def tts(body: SpeakIn) -> Response:

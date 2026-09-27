@@ -59,6 +59,10 @@ CREATE TABLE IF NOT EXISTS pending_actions (
     result TEXT,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS kv (
+    key TEXT PRIMARY KEY,               -- small bits of state, e.g. when the last briefing went out
+    value TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS phone_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     call_sid TEXT,
@@ -125,6 +129,17 @@ class Database:
         return rows[0] if rows else None
 
     # --- conversations -------------------------------------------------------
+    # --- small key/value state ----------------------------------------------------
+    def get_kv(self, key: str, default: str = "") -> str:
+        row = self.one("SELECT value FROM kv WHERE key = ?", (key,))
+        return row["value"] if row else default
+
+    def set_kv(self, key: str, value: str) -> None:
+        self.execute(
+            "INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
     def load_conversation(self, conv_id: str) -> list[dict]:
         row = self.one("SELECT messages FROM conversations WHERE id = ?", (conv_id,))
         return json.loads(row["messages"]) if row else []
@@ -276,8 +291,9 @@ class PostgresDatabase(Database):
 
     def execute(self, sql: str, params: tuple | list = ()) -> int:
         if sql.lstrip().upper().startswith("INSERT"):
-            rows, _ = self._run(sql.rstrip() + " RETURNING id", params, fetch=True)
-            new_id = rows[0]["id"] if rows else 0
+            # RETURNING * works for every table, including ones without an id column.
+            rows, _ = self._run(sql.rstrip() + " RETURNING *", params, fetch=True)
+            new_id = rows[0].get("id", 0) if rows else 0
             return new_id if isinstance(new_id, int) else 0
         _, count = self._run(sql, params, fetch=False)
         return max(count, 0)

@@ -23,6 +23,8 @@ services:
         sync: false
       - key: HOME_CITY
         sync: false
+      - key: BRIEFING_TIME
+        value: "07:30"           # morning briefing (local time), or "off"
       - key: JARVIS_EFFORT
         value: medium
       # Jarvis's voice (optional): https://elevenlabs.io

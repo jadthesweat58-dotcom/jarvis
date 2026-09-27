@@ -96,3 +96,15 @@ def complete_todo(ctx: Context, args: dict) -> str:
     if not ctx.db.execute("UPDATE todos SET done = 1 WHERE id = ?", (args["id"],)):
         raise ToolError(f"No to-do #{args['id']}.")
     return f"Marked to-do #{args['id']} as done."
+
+
+@tool(
+    "get_briefing_data",
+    "Today's briefing facts: date, weather in the user's city, today's reminders and the top "
+    "open tasks. Use when the user asks for their briefing, their day, or 'what's on today'; "
+    "add a few top news headlines with web search if they want a full briefing.",
+)
+def get_briefing_data(ctx: Context, args: dict) -> str:
+    from jarvis.briefing import as_text, gather
+
+    return as_text(gather(ctx))

@@ -104,6 +104,25 @@ Prefer the terminal? `python -m jarvis.cli` gives you a text chat.
   - "Give me my executive briefing."
   - (local mode) "Open Spotify" / "What's in my Downloads folder?"
 
+## Daily briefing
+
+Every morning at **7:30** (your `TIMEZONE`), Jarvis puts together a short spoken briefing:
+- the weather in your `HOME_CITY`
+- today's reminders
+- your most important open tasks
+- the top 3 news headlines (UAE and your city, plus one world story)
+
+It appears in the chat box and as a notification, and is read aloud if the dashboard is open.
+
+- Hear it any time: click **Briefing** above the chat box, or just ask "Jarvis, give me my
+  briefing".
+- Change the time with `BRIEFING_TIME` (e.g. `06:45`), or set it to `off`. Render → your service →
+  **Environment**.
+- On your own computer, a **double clap** greets you and then reads the briefing out loud
+  (`CLAP_BRIEFING=off` to skip it; for the cloud Jarvis also put `JARVIS_ACCESS_TOKEN` in `.env`).
+- On Render's free plan, keep the UptimeRobot monitor running so Jarvis is awake at 7:30. If
+  it was asleep, the briefing goes out as soon as it wakes, as long as it's still morning.
+
 ## Let Jarvis see your screen
 
 - **In the dashboard (cloud or local):** click the **eye** button next to the chat box and pick

@@ -107,11 +107,52 @@ def test_listener_opens_jarvis_on_double_clap(monkeypatch):
     clock = iter(np.arange(0, 10, BLOCK / SAMPLE_RATE))
     monkeypatch.setattr(clap_mod.time, "monotonic", lambda: next(clock))
     monkeypatch.setattr(clap_mod.time, "sleep", lambda s: (_ for _ in ()).throw(KeyboardInterrupt))
-    opened, spoken = [], []
+    class InlineThread:  # run the "open Jarvis" step right away instead of in the background
+        def __init__(self, target, args=(), daemon=None):
+            self.target, self.args = target, args
+
+        def start(self):
+            self.target(*self.args)
+
+    monkeypatch.setattr(clap_mod.threading, "Thread", InlineThread)
+    opened, spoken, fetched = [], [], []
     monkeypatch.setattr(clap_mod.webbrowser, "open", opened.append)
-    monkeypatch.setattr(clap_mod, "say", spoken.append)
+    monkeypatch.setattr(clap_mod, "say", lambda text, wait=False: spoken.append(text))
+    monkeypatch.setattr(clap_mod, "fetch_briefing",
+                        lambda url, token="": fetched.append((url, token)) or "Clear skies in Dubai today.")
     monkeypatch.setenv("JARVIS_URL", "https://jarvis-test.onrender.com")
 
     clap_mod.run()
     assert opened == ["https://jarvis-test.onrender.com"]
+    assert "Jarvis online" in spoken[0] and spoken[1] == "Clear skies in Dubai today."
+    assert fetched[0][0] == "https://jarvis-test.onrender.com"
+
+    # With CLAP_BRIEFING=off only the greeting is spoken.
+    monkeypatch.setenv("CLAP_BRIEFING", "off")
+    clock2 = iter(np.arange(0, 10, BLOCK / SAMPLE_RATE))
+    monkeypatch.setattr(clap_mod.time, "monotonic", lambda: next(clock2))
+    spoken.clear()
+    clap_mod.run()
     assert len(spoken) == 1 and "Jarvis online" in spoken[0]
+
+
+def test_fetch_briefing_uses_token_and_survives_errors(monkeypatch):
+    import httpx
+
+    import jarvis.clap as clap_mod
+
+    seen = []
+
+    def fake_post(url, json, headers, timeout):
+        seen.append((url, headers))
+        return httpx.Response(200, json={"text": "  Good morning, Jad.  "})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    assert clap_mod.fetch_briefing("https://j.onrender.com/", "tok") == "Good morning, Jad."
+    assert seen[0] == ("https://j.onrender.com/api/briefing", {"Authorization": "Bearer tok"})
+
+    def down(*a, **k):
+        raise httpx.ConnectError("asleep")
+
+    monkeypatch.setattr(httpx, "post", down)
+    assert clap_mod.fetch_briefing("http://localhost:8000") is None

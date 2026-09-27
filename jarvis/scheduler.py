@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import logging
 import threading
+import time
+from typing import Callable
 from datetime import datetime, timezone
 
 from jarvis.tools import Context
@@ -38,9 +40,16 @@ def fire_due_reminders(ctx: Context) -> int:
 
 
 class ReminderLoop:
-    def __init__(self, ctx: Context, interval: float | None = None):
+    """Fires due reminders every few seconds, and runs ``on_tick`` (e.g. the morning
+    briefing check) about once a minute."""
+
+    def __init__(self, ctx: Context, interval: float | None = None,
+                 on_tick: Callable[[], None] | None = None, tick_every: float = 60.0):
         self.ctx = ctx
         self.interval = interval or ctx.db.poll_interval
+        self.on_tick = on_tick
+        self.tick_every = tick_every
+        self._last_tick = 0.0
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="reminders", daemon=True)
 
@@ -56,4 +65,10 @@ class ReminderLoop:
                 fire_due_reminders(self.ctx)
             except Exception:
                 log.exception("Reminder loop error")
+            if self.on_tick and time.monotonic() - self._last_tick >= self.tick_every:
+                self._last_tick = time.monotonic()
+                try:
+                    self.on_tick()
+                except Exception:
+                    log.exception("Scheduled task error")
             self._stop.wait(self.interval)

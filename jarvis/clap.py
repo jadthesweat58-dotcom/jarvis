@@ -10,7 +10,9 @@ the Jarvis dashboard in your browser and greets you out loud.
     python -m jarvis.clap --levels     # show live sound levels, to pick a sensitivity
 
 Settings (in .env): JARVIS_URL (default http://localhost:8000),
-CLAP_SENSITIVITY (1-10, default 5; higher hears quieter claps).
+CLAP_SENSITIVITY (1-10, default 5; higher hears quieter claps), CLAP_BRIEFING
+(on/off, default on: read today's briefing after the greeting; for a cloud
+JARVIS_URL also set JARVIS_ACCESS_TOKEN).
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from datetime import datetime
@@ -99,26 +102,48 @@ def greeting(name: str) -> str:
     return f"Good {part}, {name}. Jarvis online."
 
 
-def say(text: str) -> None:
+def say(text: str, wait: bool = False) -> None:
     """Speak with the computer's own voice (British "Daniel" on a Mac)."""
     system = platform.system()
     try:
         if system == "Darwin":
-            subprocess.Popen(["say", "-v", "Daniel", text])
+            proc = subprocess.Popen(["say", "-v", "Daniel", text])
         elif system == "Windows":
             ps = ("Add-Type -AssemblyName System.Speech; "
                   "(New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak($args[0])")
-            subprocess.Popen(["powershell", "-NoProfile", "-Command", ps, text],
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            proc = subprocess.Popen(["powershell", "-NoProfile", "-Command", ps, text],
+                                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         elif shutil.which("espeak"):
-            subprocess.Popen(["espeak", text])
+            proc = subprocess.Popen(["espeak", text])
+        else:
+            return
+        if wait:
+            proc.wait()
     except OSError:
         pass  # no voice available; opening the dashboard still works
 
 
-def open_jarvis(url: str, name: str) -> None:
+def fetch_briefing(url: str, token: str = "") -> str | None:
+    """Today's briefing from the Jarvis server (local or cloud), or None."""
+    import httpx
+
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        resp = httpx.post(url.rstrip("/") + "/api/briefing", json={}, headers=headers, timeout=90)
+        if resp.status_code == 200:
+            return (resp.json().get("text") or "").strip() or None
+    except Exception:
+        pass  # server asleep or unreachable: the greeting alone will do
+    return None
+
+
+def open_jarvis(url: str, name: str, briefing: bool = True, token: str = "") -> None:
     webbrowser.open(url)
-    say(greeting(name))
+    say(greeting(name), wait=briefing)
+    if briefing:
+        text = fetch_briefing(url, token)
+        if text:
+            say(text)
 
 
 def run(test: bool = False, levels: bool = False) -> None:
@@ -132,6 +157,7 @@ def run(test: bool = False, levels: bool = False) -> None:
 
     url = os.environ.get("JARVIS_URL", "http://localhost:8000").strip()
     sensitivity = int(os.environ.get("CLAP_SENSITIVITY", "5") or 5)
+    briefing = os.environ.get("CLAP_BRIEFING", "on").strip().lower() not in ("off", "0", "no", "false")
     detector = ClapDetector(sensitivity)
     print(f"Listening for a double clap (sensitivity {sensitivity}). Press Ctrl+C to stop.")
 
@@ -145,7 +171,9 @@ def run(test: bool = False, levels: bool = False) -> None:
                 print("\nClap clap! (test mode: not opening Jarvis)")
             else:
                 print("\nClap clap! Opening Jarvis…")
-                open_jarvis(url, settings.my_name)
+                # Off the audio thread: the briefing can take a few seconds to arrive.
+                threading.Thread(target=open_jarvis, daemon=True,
+                                 args=(url, settings.my_name, briefing, settings.access_token)).start()
 
     try:
         with sd.InputStream(channels=1, samplerate=SAMPLE_RATE, blocksize=BLOCK, callback=on_audio):

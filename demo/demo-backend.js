@@ -302,6 +302,25 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
       feed: state.feed,
     }),
     "GET /api/system": () => system(),
+    "POST /api/briefing": async () => {
+      const today = state.reminders.filter((r) => r.status === "pending" && new Date(r.due_at) >= now()
+        && new Date(r.due_at) < new Date(startOfDay().getTime() + 86400000));
+      const open = state.todos.filter((t) => !t.done).sort((a, b) => PRI[a.priority] - PRI[b.priority]);
+      const facts = `Date: ${now().toDateString()}.\nReminders today: ${today.map((r) => `${localTime(new Date(r.due_at))} ${r.message}`).join("; ") || "none"}.\n`
+        + `Open tasks: ${open.slice(0, 5).map((t) => `${t.task} (${t.priority || "med"})`).join("; ") || "none"}.`;
+      const sample = await samplePromise;
+      if (sample && sampleState !== "declined") {
+        try {
+          const { text } = await sample(`${PERSONA}\n\nGive me my briefing for today, to be read aloud: about 100 words, no lists or emoji. `
+            + `Open with "Good ${new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening"}, Commander." `
+            + `Cover today's reminders and the most important open tasks. You can't check live weather or news in this demo, so skip them.\n\n${facts}`,
+            { cache: false, modelTier: "quick" });
+          return { text };
+        } catch { /* fall through to the plain version */ }
+      }
+      return { text: `Good day, Commander. You have ${today.length} reminder${today.length === 1 ? "" : "s"} today and ${open.length} open task${open.length === 1 ? "" : "s"}`
+        + (open.length ? `, starting with ${open[0].task}.` : ".") };
+    },
     "POST /api/todos": (body) => {
       const task = String((body && body.task) || "").trim();
       if (!task) return [400, { detail: "The task is empty." }];

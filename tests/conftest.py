@@ -65,6 +65,7 @@ def settings(tmp_path):
     return replace(
         Settings(),
         provider="claude",
+        briefing_time="off",
         anthropic_api_key="test",
         gemini_api_key="",
         my_name="Tony",
