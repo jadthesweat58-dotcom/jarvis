@@ -272,7 +272,7 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
   const routes = {
     "GET /api/status": () => ({
       name: "Commander", mode: "demo", model: "Claude (claude.ai)", phone: false, computer_control: false,
-      two_way_calls: false, claude: sampleState !== "absent" && sampleState !== "declined", web_search: false,
+      two_way_calls: false, ai_name: "Claude (demo)", ai_ready: sampleState !== "absent" && sampleState !== "declined", web_search: false,
       home_city: "", timezone: tz,
     }),
     "GET /api/dashboard": () => ({

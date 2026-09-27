@@ -10,7 +10,7 @@ if not exist .venv\.installed (
 )
 if not exist .env (
   copy .env.example .env >nul
-  echo Created .env - paste your ANTHROPIC_API_KEY into it, save, then run this again.
+  echo Created .env - paste your GEMINI_API_KEY into it, save, then run this again.
   notepad .env
   pause
   exit /b 1

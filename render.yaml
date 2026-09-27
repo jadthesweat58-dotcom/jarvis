@@ -11,7 +11,9 @@ services:
       mountPath: /data       # Jarvis's memory database lives here
       sizeGB: 1
     envVars:
-      - key: ANTHROPIC_API_KEY
+      - key: JARVIS_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
         sync: false
       - key: JARVIS_ACCESS_TOKEN
         generateValue: true  # Render creates a strong password; copy it from the dashboard
@@ -21,8 +23,6 @@ services:
         sync: false
       - key: HOME_CITY
         sync: false
-      - key: JARVIS_MODEL
-        value: claude-opus-5
       - key: JARVIS_EFFORT
         value: medium
       - key: TWILIO_ACCOUNT_SID

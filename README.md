@@ -1,6 +1,6 @@
 # JARVIS — your personal AI assistant
 
-Jarvis is your own AI assistant, powered by Claude. You can **talk to it** (voice or text) from a
+Jarvis is your own AI assistant, powered by Google Gemini (or Claude, if you prefer). You can **talk to it** (voice or text) from a
 "command center" web dashboard on your computer or phone. It can:
 
 - 🧠 **Remember you**: facts, preferences, people and plans, kept between conversations
@@ -21,7 +21,7 @@ Anything risky (calling or texting someone else, running a command, writing a fi
 
 | What | Needed for | Where |
 |---|---|---|
-| **Anthropic API key** | Everything (required) | https://console.anthropic.com → API Keys |
+| **Gemini API key** | Everything (required) | https://aistudio.google.com/apikey → Create API key |
 | **Twilio** account SID, auth token and phone number | Calls & texts (optional) | https://www.twilio.com/console |
 
 > Twilio trial accounts can only call and text numbers you have verified in the Twilio console.
@@ -34,7 +34,7 @@ Jarvis ships as a Docker app, so it runs on any host. The easiest is **Render**:
 2. Go to https://dashboard.render.com → **New → Blueprint** → pick this repo. Render reads
    `render.yaml` and sets everything up, including a disk so Jarvis's memory survives restarts.
 3. Fill in the settings it asks for:
-   - `ANTHROPIC_API_KEY`: your key
+   - `GEMINI_API_KEY`: your Gemini key
    - `MY_NAME`: what Jarvis calls you
    - `TIMEZONE`: e.g. `America/New_York`, `Europe/London`, `Asia/Karachi`
    - `HOME_CITY`: e.g. `London, UK` (for weather)
@@ -60,7 +60,7 @@ Jarvis; anyone else can leave a message, which appears in your feed and notes.
 3. Start it:
    - **Windows**: double-click `scripts\start.bat`
    - **Mac / Linux**: run `./scripts/start.sh` in a terminal
-4. The first run creates a `.env` file. Open it, paste your `ANTHROPIC_API_KEY`, and set
+4. The first run creates a `.env` file. Open it, paste your `GEMINI_API_KEY`, and set
    `JARVIS_MODE=local` if you want Jarvis to control your computer. Run the script again.
 5. Your browser opens `http://localhost:8000`. (On your own computer no access token is needed.)
 
@@ -87,7 +87,8 @@ See `.env.example` for all of them. The main ones:
 | Setting | Meaning |
 |---|---|
 | `JARVIS_MODE` | `cloud` (safe, no computer control) or `local` (can control this computer) |
-| `JARVIS_MODEL` | Claude model, default `claude-opus-5` |
+| `JARVIS_PROVIDER` | `gemini` (default) or `claude`. With `claude`, set `ANTHROPIC_API_KEY` instead |
+| `JARVIS_MODEL` | Leave empty for the default (`gemini-3.8-flash`); `gemini-3.1-flash-lite` is cheaper |
 | `JARVIS_EFFORT` | `low` (fastest/cheapest) · `medium` (default) · `high` (smartest) |
 | `JARVIS_ACCESS_TOKEN` | Password for the web app. **Required in the cloud.** |
 | `JARVIS_FILES_ROOT` | The only folder Jarvis may read/write in local mode (default: your home folder) |
@@ -108,7 +109,8 @@ See `.env.example` for all of them. The main ones:
 
 ```
 jarvis/
-  brain.py        Claude conversation loop: tools, approvals, saved history
+  brain.py        conversation loop (Claude): tools, approvals, saved history
+  gemini_brain.py the same loop on Google Gemini
   server.py       FastAPI web server: dashboard API, live events, Twilio webhooks
   cli.py          terminal chat
   tools/          memory, notes, web (weather), reminders, calls, computer
@@ -116,7 +118,7 @@ jarvis/
   scheduler.py    fires reminders
   db.py           SQLite storage (data/jarvis.db)
   static/         the command-center web app (HTML/CSS/JS, no build step)
-tests/            pytest suite (uses fake Claude & Twilio, no keys needed)
+tests/            pytest suite (uses fake Gemini, Claude & Twilio; no keys needed)
 ```
 
 Run the tests: `pip install -r requirements-dev.txt && python -m pytest`

@@ -5,7 +5,7 @@ from __future__ import annotations
 import sys
 
 from jarvis.app import build_context
-from jarvis.brain import Brain
+from jarvis.brain import create_brain
 from jarvis.scheduler import ReminderLoop
 from jarvis.tools import Tool
 
@@ -21,9 +21,10 @@ def main() -> None:
     ctx = build_context()
     ctx.notifier.subscribe(lambda e: print(f"\n{YELLOW}🔔 {e['message']}{RESET}\nYou: ", end="", flush=True))
     ReminderLoop(ctx).start()
-    brain = Brain(ctx, conversation_id="cli", approver=ask_approval)
+    brain = create_brain(ctx, conversation_id="cli", approver=ask_approval)
     mode = "local (computer control on)" if ctx.settings.is_local else "cloud (computer control off)"
-    print(f"{BLUE}J.A.R.V.I.S. online.{RESET} {DIM}Mode: {mode}. Type 'new' for a fresh "
+    print(f"{BLUE}J.A.R.V.I.S. online.{RESET} {DIM}Brain: {ctx.settings.provider_name} "
+          f"({ctx.settings.model}). Mode: {mode}. Type 'new' for a fresh "
           f"conversation, 'quit' to exit.{RESET}")
     while True:
         try:

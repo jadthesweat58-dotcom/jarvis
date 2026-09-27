@@ -25,7 +25,7 @@ from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
 from jarvis.app import build_context
-from jarvis.brain import Brain, resolve_action
+from jarvis.brain import Brain, create_brain, resolve_action
 from jarvis.db import utcnow
 from jarvis.phone import say
 from jarvis.scheduler import ReminderLoop
@@ -65,7 +65,7 @@ formatting. When the conversation is over, say a brief goodbye and end your repl
 
 def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] | None = None) -> FastAPI:
     ctx = ctx or build_context()
-    make_brain = brain_factory or (lambda **kw: Brain(ctx, **kw))
+    make_brain = brain_factory or (lambda **kw: create_brain(ctx, **kw))
     main_brain = make_brain(conversation_id="main")
     call_brains: dict[int, Brain] = {}
     feed: deque[dict] = deque(maxlen=30)  # recent notifications, for the live feed
@@ -160,7 +160,8 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
         return {"name": s.my_name, "mode": s.mode, "model": s.model,
                 "phone": s.twilio_enabled, "computer_control": s.is_local,
                 "two_way_calls": s.twilio_enabled and bool(s.public_base_url),
-                "claude": bool(s.anthropic_api_key), "home_city": s.home_city, "timezone": s.timezone}
+                "ai_name": s.provider_name, "ai_ready": bool(s.ai_key), "web_search": bool(s.ai_key),
+                "home_city": s.home_city, "timezone": s.timezone}
 
     @app.post("/api/chat", dependencies=[Depends(require_user)])
     def chat(body: ChatIn) -> dict[str, Any]:

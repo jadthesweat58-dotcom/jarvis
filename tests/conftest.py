@@ -64,7 +64,9 @@ class FakeTwilio:
 def settings(tmp_path):
     return replace(
         Settings(),
+        provider="claude",
         anthropic_api_key="test",
+        gemini_api_key="",
         my_name="Tony",
         timezone="UTC",
         home_city="",

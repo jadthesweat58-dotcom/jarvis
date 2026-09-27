@@ -1,7 +1,9 @@
-"""Jarvis's brain: a Claude conversation loop that can use tools.
+"""Jarvis's brain: an AI conversation loop that can use tools.
 
-``Brain.chat(text)`` sends the user's message to Claude, runs whatever tools
-Claude asks for, feeds the results back, and repeats until Claude answers.
+``Brain.chat(text)`` sends the user's message to the AI model, runs whatever
+tools it asks for, feeds the results back, and repeats until it answers.
+``Brain`` talks to Claude; ``jarvis.gemini_brain.GeminiBrain`` talks to Gemini.
+Use ``create_brain`` to get the one chosen by JARVIS_PROVIDER.
 
 Conversation history is only ever appended to (never edited), and it is saved
 to the database so Jarvis keeps its train of thought across restarts.
@@ -150,16 +152,21 @@ class Brain:
             defs.append(search)
         return defs
 
-    def _user_turn(self, text: str) -> dict:
+    def _user_texts(self, text: str) -> list[str]:
+        """The pieces of a new user turn: remembered facts (new conversations only)
+        and the message itself, stamped with the local time."""
         now = datetime.now(self.settings.tz).strftime("%A %d %B %Y, %H:%M")
-        content: list[dict] = []
+        texts: list[str] = []
         if not self.messages and self.remember_facts:
-            # New conversation: hand Claude everything it knows about the user.
+            # New conversation: hand the model everything it knows about the user.
             facts = facts_for_prompt(self.ctx)
             if facts:
-                content.append({"type": "text", "text": f"<things_you_remember_about_me>\n{facts}\n</things_you_remember_about_me>"})
-        content.append({"type": "text", "text": f"[{now}] {text}"})
-        return {"role": "user", "content": content}
+                texts.append(f"<things_you_remember_about_me>\n{facts}\n</things_you_remember_about_me>")
+        texts.append(f"[{now}] {text}")
+        return texts
+
+    def _user_turn(self, text: str) -> dict:
+        return {"role": "user", "content": [{"type": "text", "text": t} for t in self._user_texts(text)]}
 
     def _request(self) -> Any:
         params: dict[str, Any] = {
@@ -220,12 +227,18 @@ class Brain:
         return "\n".join(b.text for b in content if b.type == "text").strip() or "Done."
 
     def _run_tool(self, block: Any, actions: list[dict]) -> dict:
-        args = dict(block.input or {})
-        result: dict[str, Any] = {"type": "tool_result", "tool_use_id": block.id}
-        tool = self.tool_map.get(block.name)
+        output, is_error = self._execute_tool(block.name, dict(block.input or {}), actions)
+        result: dict[str, Any] = {"type": "tool_result", "tool_use_id": block.id, "content": output}
+        if is_error:
+            result["is_error"] = True
+        return result
+
+    def _execute_tool(self, name: str, args: dict, actions: list[dict]) -> tuple[str, bool]:
+        """Run one tool call (or queue it for approval). Returns (output, is_error)."""
+        tool = self.tool_map.get(name)
         try:
             if tool is None:
-                raise ToolError(f"Unknown tool {block.name}.")
+                raise ToolError(f"Unknown tool {name}.")
             if tool.requires_approval(self.ctx, args):
                 if tool.prepare:
                     args = tool.prepare(self.ctx, args)  # freeze details, e.g. the exact number
@@ -244,13 +257,12 @@ class Brain:
                               "don't call this tool again for it.")
             else:
                 output = tool.handler(self.ctx, args)
-            result["content"] = output or "(no output)"
+            return output or "(no output)", False
         except ToolError as exc:
-            result.update(content=str(exc), is_error=True)
+            return str(exc), True
         except Exception as exc:
-            log.exception("Tool %s failed", block.name)
-            result.update(content=f"The tool failed: {type(exc).__name__}: {exc}", is_error=True)
-        return result
+            log.exception("Tool %s failed", name)
+            return f"The tool failed: {type(exc).__name__}: {exc}", True
 
     def _save(self) -> None:
         self.ctx.db.save_conversation(self.conversation_id, self.messages)
@@ -282,3 +294,15 @@ def resolve_action(ctx: Context, action_id: int, approve: bool) -> tuple[dict, s
             result = f"Failed: {exc}"
     ctx.db.execute("UPDATE pending_actions SET result = ? WHERE id = ?", (result, action_id))
     return action, result
+
+
+ClaudeBrain = Brain
+
+
+def create_brain(ctx: Context, **kwargs: Any) -> Brain:
+    """The brain for the configured AI provider (JARVIS_PROVIDER: gemini or claude)."""
+    if ctx.settings.provider == "gemini":
+        from jarvis.gemini_brain import GeminiBrain
+
+        return GeminiBrain(ctx, **kwargs)
+    return Brain(ctx, **kwargs)

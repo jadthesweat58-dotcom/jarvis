@@ -9,7 +9,7 @@ if [ ! -f .venv/.installed ]; then
   .venv/bin/pip install -q -r requirements.txt
   touch .venv/.installed
 fi
-[ -f .env ] || { cp .env.example .env; echo "Created .env - open it and paste your ANTHROPIC_API_KEY, then run this again."; exit 1; }
+[ -f .env ] || { cp .env.example .env; echo "Created .env - open it and paste your GEMINI_API_KEY, then run this again."; exit 1; }
 PORT="${PORT:-8000}"
 echo "Jarvis is starting at http://localhost:$PORT  (press Ctrl+C to stop)"
 ( sleep 3; (command -v open >/dev/null && open "http://localhost:$PORT") || (command -v xdg-open >/dev/null && xdg-open "http://localhost:$PORT") || true ) &

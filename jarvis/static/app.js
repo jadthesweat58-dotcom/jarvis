@@ -384,7 +384,7 @@
   $("briefBtn").onclick = () => send(BRIEFING);
 
   // ------------------------------------------------------------------ dashboard rendering
-  const searchOn = () => (status.web_search === undefined ? !!status.claude : !!status.web_search);
+  const searchOn = () => (status.web_search === undefined ? !!status.ai_ready : !!status.web_search);
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   function ovItem(ic, color, title, sub) {
     const li = el("li");
@@ -406,7 +406,7 @@
     ul.innerHTML = "";
     const G = "var(--green)", Y = "var(--yellow)", M = "var(--muted)", C = "var(--glow)", P = "var(--purple)", O = "var(--orange)";
     ul.append(
-      ovItem("brain", status.claude ? G : "var(--red)", "AI Core", status.claude ? `Active · ${status.model}` : "No API key"),
+      ovItem("brain", status.ai_ready ? G : "var(--red)", "AI Core", status.ai_ready ? `Active · ${status.model}` : "No API key"),
       ovItem("database", C, "Memory", `${c.facts || 0} stored · ${c.notes || 0} notes`),
       ovItem("mic", voiceIn ? G : Y, "Voice", voiceIn ? (wakeOn() ? "Wake word on" : "Online") : "Speech off (use Chrome)"),
       ovItem("phone", status.phone ? G : M, "Phone", status.phone ? (status.two_way_calls ? "Two-way ready" : "Connected") : "Not set up"),
@@ -553,8 +553,8 @@
     const G = "var(--green)", M = "var(--muted)", Y = "var(--yellow)";
     const perm = "Notification" in window ? Notification.permission : "unsupported";
     const items = [
-      ["brain", "Claude", status.claude, status.claude ? "Connected" : "Add API key"],
-      ["globe", "Web Search", searchOn(), searchOn() ? "Connected" : status.claude ? "Full version" : "Needs Claude"],
+      ["brain", status.ai_name || "AI", status.ai_ready, status.ai_ready ? "Connected" : "Add API key"],
+      ["globe", "Web Search", searchOn(), searchOn() ? "Connected" : status.ai_ready ? "Full version" : "Needs API key"],
       ["cloud", "Weather", !!(weather && weather.available), weather && weather.available ? "Open-Meteo" : weather && weather.label ? weather.label : status.home_city ? "Unreachable" : "Set HOME_CITY"],
       ["phone", "Twilio Phone", status.phone, status.phone ? "Connected" : "Not linked"],
       ["message", "Two-way Calls", status.two_way_calls, status.two_way_calls ? "Ready" : "Needs public URL"],
@@ -637,8 +637,8 @@
   function setSystem(ok) {
     const s = $("sysStatus");
     s.classList.toggle("bad", !ok);
-    s.innerHTML = `<i class="dot"></i>${ok ? (status.claude ? "OPTIMAL" : "NO API KEY") : "RECONNECTING"}`;
-    if (ok && !status.claude) s.classList.add("bad");
+    s.innerHTML = `<i class="dot"></i>${ok ? (status.ai_ready ? "OPTIMAL" : "NO API KEY") : "RECONNECTING"}`;
+    if (ok && !status.ai_ready) s.classList.add("bad");
   }
 
   // ------------------------------------------------------------------ clock
