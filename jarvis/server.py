@@ -31,6 +31,7 @@ from jarvis.phone import say
 from jarvis.scheduler import ReminderLoop
 from jarvis.tools import Context, ToolError, available_tools
 from jarvis.tools.web import fetch_weather
+from jarvis.voice import ElevenLabsVoice, VoiceError
 
 log = logging.getLogger("jarvis.server")
 STATIC = Path(__file__).parent / "static"
@@ -55,6 +56,10 @@ class DoneIn(BaseModel):
     done: bool
 
 
+class SpeakIn(BaseModel):
+    text: str
+
+
 def contact_call_prompt(ctx: Context, call: dict) -> str:
     owner = ctx.settings.my_name
     who = call["contact_name"] or "the caller"
@@ -72,8 +77,10 @@ behalf. Be polite and natural. Keep every reply to one or two short spoken sente
 formatting. When the conversation is over, say a brief goodbye and end your reply with {HANGUP}."""
 
 
-def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] | None = None) -> FastAPI:
+def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] | None = None,
+               voice: ElevenLabsVoice | None = None) -> FastAPI:
     ctx = ctx or build_context()
+    voice = voice or ElevenLabsVoice(ctx.settings)
     make_brain = brain_factory or (lambda **kw: create_brain(ctx, **kw))
     main_brain = make_brain(conversation_id="main")
     call_brains: dict[int, Brain] = {}
@@ -171,7 +178,8 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
                 "phone": s.twilio_enabled, "computer_control": s.is_local,
                 "two_way_calls": s.twilio_enabled and bool(s.public_base_url),
                 "ai_name": s.provider_name, "ai_ready": bool(s.ai_key), "web_search": bool(s.ai_key),
-                "home_city": s.home_city, "timezone": s.timezone, "started_at": started_at}
+                "home_city": s.home_city, "timezone": s.timezone, "started_at": started_at,
+                "tts": "elevenlabs" if voice.enabled else "browser"}
 
     @app.post("/api/chat", dependencies=[Depends(require_user)])
     def chat(body: ChatIn) -> dict[str, Any]:
@@ -264,6 +272,19 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     @app.get("/api/system", dependencies=[Depends(require_user)])
     def system() -> dict[str, float]:
         return system_stats()
+
+    @app.post("/api/tts", dependencies=[Depends(require_user)])
+    def tts(body: SpeakIn) -> Response:
+        if not voice.enabled:
+            raise HTTPException(404, "ElevenLabs isn't set up.")
+        try:
+            audio = voice.speak(body.text)
+        except VoiceError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        except Exception as exc:
+            log.exception("ElevenLabs request failed")
+            raise HTTPException(502, "Couldn't reach ElevenLabs.") from exc
+        return Response(audio, media_type="audio/mpeg", headers={"Cache-Control": "no-store"})
 
     @app.post("/api/todos", dependencies=[Depends(require_user)])
     def add_task(body: TaskIn) -> dict[str, Any]:

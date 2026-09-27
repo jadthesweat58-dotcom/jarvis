@@ -25,6 +25,11 @@ services:
         sync: false
       - key: JARVIS_EFFORT
         value: medium
+      # Jarvis's voice (optional): https://elevenlabs.io
+      - key: ELEVENLABS_API_KEY
+        sync: false
+      - key: ELEVENLABS_VOICE_ID
+        sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN

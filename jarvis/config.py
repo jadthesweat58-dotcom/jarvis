@@ -45,6 +45,11 @@ class Settings:
         default_factory=lambda: Path(_env("JARVIS_FILES_ROOT") or Path.home()).expanduser()
     )
 
+    # Jarvis's voice: ElevenLabs text-to-speech (optional; otherwise the browser's voice).
+    elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))
+    elevenlabs_voice_id: str = field(default_factory=lambda: _env("ELEVENLABS_VOICE_ID"))
+    elevenlabs_model: str = field(default_factory=lambda: _env("ELEVENLABS_MODEL", "eleven_flash_v2_5"))
+
     twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
     twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
     twilio_phone_number: str = field(default_factory=lambda: _env("TWILIO_PHONE_NUMBER"))
@@ -71,6 +76,10 @@ class Settings:
     @property
     def ai_key_name(self) -> str:
         return "GEMINI_API_KEY" if self.provider == "gemini" else "ANTHROPIC_API_KEY"
+
+    @property
+    def tts_enabled(self) -> bool:
+        return bool(self.elevenlabs_api_key and self.elevenlabs_voice_id)
 
     @property
     def is_local(self) -> bool:

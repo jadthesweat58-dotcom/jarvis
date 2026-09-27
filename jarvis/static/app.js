@@ -274,26 +274,88 @@
   }
   if (voiceOut) { pickVoice(); speechSynthesis.onvoiceschanged = pickVoice; }
 
+  const clean = (text) => text.replace(/[*_#`>]/g, "").replace(/https?:\/\/\S+/g, "the link");
   let utteranceId = 0;
-  function speak(text) {
+
+  // Replies are spoken by ElevenLabs when the server has it set up, otherwise by the
+  // browser's own voice. ElevenLabs audio plays through Web Audio: once the page has
+  // been tapped, Safari allows it to play later (after the reply arrives).
+  let audioCtx = null, playing = null, elevenFailed = false;
+  function getAudioCtx() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!audioCtx && Ctx) audioCtx = new Ctx();
+    return audioCtx;
+  }
+  for (const evt of ["pointerdown", "keydown", "touchend"]) {
+    window.addEventListener(evt, () => {
+      const c = getAudioCtx();
+      if (c && c.state === "suspended") c.resume().catch(() => {});
+    }, { passive: true });
+  }
+  function stopAudio() {
+    if (playing) { playing.onended = null; try { playing.stop(); } catch { /* not started */ } playing = null; }
+    if (voiceOut) speechSynthesis.cancel();
+  }
+
+  function finish(id, resolve) {
+    if (id === utteranceId) { setMode("idle"); resumeListening(); }
+    resolve();
+  }
+
+  function speakBrowser(text, id) {
     return new Promise((resolve) => {
-      if (!speakToggle.checked || !voiceOut || !text) return resolve();
-      pauseListening();
-      const id = ++utteranceId;
-      speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text.replace(/[*_#`>]/g, "").replace(/https?:\/\/\S+/g, "the link"));
+      if (!voiceOut) return finish(id, resolve);
+      const u = new SpeechSynthesisUtterance(clean(text));
       if (voice) u.voice = voice;
       u.rate = 1.03;
-      setMode("speaking");
-      u.onend = u.onerror = () => {
-        // cancel() fires the previous utterance's end event; only the newest one counts.
-        if (id === utteranceId) { setMode("idle"); resumeListening(); }
-        resolve();
-      };
+      // cancel() fires the previous utterance's end event; only the newest one counts.
+      u.onend = u.onerror = () => finish(id, resolve);
       speechSynthesis.speak(u);
     });
   }
-  function stopSpeaking() { utteranceId++; if (voiceOut) speechSynthesis.cancel(); setMode("idle"); resumeListening(); }
+
+  async function speakEleven(text, id) {
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ text: clean(text) }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || `Error ${res.status}`);
+    }
+    const bytes = await res.arrayBuffer();
+    if (id !== utteranceId) return;  // something newer started meanwhile
+    const c = getAudioCtx();
+    if (!c) throw new Error("This browser can't play the audio.");
+    if (c.state === "suspended") await c.resume().catch(() => {});
+    const buffer = await c.decodeAudioData(bytes);
+    if (id !== utteranceId) return;
+    await new Promise((resolve) => {
+      playing = c.createBufferSource();
+      playing.buffer = buffer;
+      playing.connect(c.destination);
+      playing.onended = () => { playing = null; finish(id, resolve); };
+      playing.start();
+    });
+  }
+
+  async function speak(text) {
+    if (!speakToggle.checked || !text) return;
+    pauseListening();
+    const id = ++utteranceId;
+    stopAudio();
+    setMode("speaking");
+    if (status.tts === "elevenlabs" && !elevenFailed) {
+      try { return await speakEleven(text, id); } catch (e) {
+        elevenFailed = true;  // don't keep retrying; the built-in voice takes over
+        toast(`${e.message} Using the built-in voice instead.`, true);
+        if (id !== utteranceId) return;
+      }
+    }
+    return speakBrowser(text, id);
+  }
+  function stopSpeaking() { utteranceId++; stopAudio(); setMode("idle"); resumeListening(); }
 
   // ------------------------------------------------------------------ voice in
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -357,7 +419,8 @@
   function talkOrStop() {
     if (core.mode === "speaking") return stopSpeaking();
     if (core.mode === "listening") { stopRecognition(); setMode("idle", "Standing by."); return; }
-    if (voiceOut) speechSynthesis.cancel();
+    utteranceId++;
+    stopAudio();
     startRecognition(false);
   }
   function setWake(on) {

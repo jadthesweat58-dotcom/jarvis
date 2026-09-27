@@ -175,3 +175,59 @@ def test_priority_column_added_to_old_databases(tmp_path):
     old.close()
     db = Database(path)
     assert db.one("SELECT task, priority FROM todos") == {"task": "old task", "priority": "med"}
+
+
+class FakeElevenLabs:
+    def __init__(self, status=200, body=b"ID3fake-mp3"):
+        self.status, self.body, self.requests = status, body, []
+
+    def handle(self, request):
+        import httpx
+
+        self.requests.append(request)
+        if self.status != 200:
+            return httpx.Response(self.status, json={"detail": {"status": "quota_exceeded" if self.status == 402 else "x",
+                                                                  "message": "nope"}})
+        return httpx.Response(200, content=self.body, headers={"content-type": "audio/mpeg"})
+
+
+def voice_client(ctx, fake):
+    import httpx
+
+    from jarvis.voice import ElevenLabsVoice
+
+    voice = ElevenLabsVoice(ctx.settings, client=httpx.Client(transport=httpx.MockTransport(fake.handle)))
+    app = create_app(ctx, brain_factory=lambda **kw: Brain(ctx, client=FakeClaude(), **kw), voice=voice)
+    return TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000))
+
+
+def test_tts_off_until_configured(ctx):
+    client = voice_client(ctx, FakeElevenLabs())
+    assert client.get("/api/status").json()["tts"] == "browser"
+    assert client.post("/api/tts", json={"text": "hi"}).status_code == 404
+
+
+def test_tts_with_elevenlabs(ctx):
+    import json
+
+    ctx.settings.elevenlabs_api_key, ctx.settings.elevenlabs_voice_id = "el-key", "voice123"
+    fake = FakeElevenLabs()
+    client = voice_client(ctx, fake)
+    assert client.get("/api/status").json()["tts"] == "elevenlabs"
+    r = client.post("/api/tts", json={"text": "Good   evening,\n Jad."})
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg" and r.content == b"ID3fake-mp3"
+    sent = fake.requests[0]
+    assert sent.url.path == "/v1/text-to-speech/voice123" and sent.headers["xi-api-key"] == "el-key"
+    assert json.loads(sent.content) == {"text": "Good evening, Jad.", "model_id": "eleven_flash_v2_5"}
+    client.post("/api/tts", json={"text": "Good evening, Jad."})
+    assert len(fake.requests) == 1  # repeated phrase came from the cache
+    client.post("/api/tts", json={"text": "x" * 5000})
+    assert len(json.loads(fake.requests[-1].content)["text"]) == 1000
+    assert client.post("/api/tts", json={"text": "   "}).status_code == 502
+
+
+def test_tts_errors_are_explained(ctx):
+    ctx.settings.elevenlabs_api_key, ctx.settings.elevenlabs_voice_id = "bad", "voice123"
+    for status, words in ((401, "API key"), (404, "voice"), (402, "quota")):
+        r = voice_client(ctx, FakeElevenLabs(status=status)).post("/api/tts", json={"text": "hello"})
+        assert r.status_code == 502 and words in r.json()["detail"]

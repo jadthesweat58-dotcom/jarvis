@@ -104,6 +104,20 @@ Prefer the terminal? `python -m jarvis.cli` gives you a text chat.
   - "Give me my executive briefing."
   - (local mode) "Open Spotify" / "What's in my Downloads folder?"
 
+## Jarvis's voice (ElevenLabs, optional)
+
+By default Jarvis speaks with your browser's built-in voice. For a realistic voice:
+
+1. Sign up at https://elevenlabs.io and create an API key (Profile / **API Keys**).
+2. Open the **Voice Library**, pick a voice you like (a calm British male suits Jarvis) and copy
+   its **Voice ID**.
+3. Add `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` in Render → your service → **Environment**
+   (or in `.env` on your computer). Render redeploys by itself.
+
+The key stays on the server. Long replies are cut at 1,000 characters to save your monthly
+quota, and if ElevenLabs stops working (quota used up, bad key) Jarvis says so once and
+switches back to the built-in voice.
+
 ## Settings (`.env`)
 
 See `.env.example` for all of them. The main ones:
