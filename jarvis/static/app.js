@@ -290,7 +290,7 @@
   const wakeOn = () => wakeToggle.checked;
 
   function startRecognition(continuous) {
-    if (!Recognition) { toast("Voice input needs Chrome, Edge or Safari. You can still type.", true); return; }
+    if (!Recognition) { toast(window.JARVIS_NO_VOICE_MSG || "Voice input needs Chrome, Edge or Safari. You can still type.", true); return; }
     stopRecognition();
     rec = new Recognition();
     rec.lang = navigator.language || "en-US";
@@ -384,6 +384,7 @@
   $("briefBtn").onclick = () => send(BRIEFING);
 
   // ------------------------------------------------------------------ dashboard rendering
+  const searchOn = () => (status.web_search === undefined ? !!status.claude : !!status.web_search);
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
   function ovItem(ic, color, title, sub) {
     const li = el("li");
@@ -410,7 +411,7 @@
       ovItem("mic", voiceIn ? G : Y, "Voice", voiceIn ? (wakeOn() ? "Wake word on" : "Online") : "Speech off (use Chrome)"),
       ovItem("phone", status.phone ? G : M, "Phone", status.phone ? (status.two_way_calls ? "Two-way ready" : "Connected") : "Not set up"),
       ovItem("tool", P, "Skills", `${c.tools || 0} tools ready`),
-      ovItem("shield", O, "System", status.computer_control ? "Local · computer control" : "Cloud · safe mode"),
+      ovItem("shield", O, "System", status.mode === "demo" ? "Demo · runs in this page" : status.computer_control ? "Local · computer control" : "Cloud · safe mode"),
     );
   }
 
@@ -470,7 +471,7 @@
   function renderSkills() {
     const c = dash.counts || {};
     const skills = [
-      ["globe", "var(--glow)", "Research", "active", "Web search"],
+      ["globe", "var(--glow)", "Research", searchOn() ? "active" : "off", searchOn() ? "Web search" : "Full version"],
       ["database", "var(--purple)", "Memory", "active", `${c.facts || 0} facts`],
       ["calendar", "var(--glow)", "Reminders", c.reminders ? "active" : "standby", c.reminders ? `${c.reminders} upcoming` : "Standby"],
       ["phone", "var(--orange)", "Phone", status.phone ? "active" : "off", status.phone ? "Ready" : "Not set up"],
@@ -553,8 +554,8 @@
     const perm = "Notification" in window ? Notification.permission : "unsupported";
     const items = [
       ["brain", "Claude", status.claude, status.claude ? "Connected" : "Add API key"],
-      ["globe", "Web Search", status.claude, status.claude ? "Connected" : "Needs Claude"],
-      ["cloud", "Weather", !!(weather && weather.available), weather && weather.available ? "Open-Meteo" : status.home_city ? "Unreachable" : "Set HOME_CITY"],
+      ["globe", "Web Search", searchOn(), searchOn() ? "Connected" : status.claude ? "Full version" : "Needs Claude"],
+      ["cloud", "Weather", !!(weather && weather.available), weather && weather.available ? "Open-Meteo" : weather && weather.label ? weather.label : status.home_city ? "Unreachable" : "Set HOME_CITY"],
       ["phone", "Twilio Phone", status.phone, status.phone ? "Connected" : "Not linked"],
       ["message", "Two-way Calls", status.two_way_calls, status.two_way_calls ? "Ready" : "Needs public URL"],
       ["monitor", "Computer", status.computer_control, status.computer_control ? "Enabled" : "Cloud mode"],
@@ -586,7 +587,7 @@
     $("bLocation").textContent = (weather && weather.place) || status.home_city || status.timezone || "—";
     $("bWeather").textContent = weather && weather.available
       ? `${Math.round(weather.temperature)}${weather.unit} ${weather.summary}`
-      : status.home_city ? "Unavailable" : "Set HOME_CITY";
+      : weather && weather.label ? weather.label : status.home_city ? "Unavailable" : "Set HOME_CITY";
     const online = navigator.onLine;
     const q = lastLatency == null ? "" : lastLatency < 250 ? "Excellent" : lastLatency < 800 ? "Good" : "Slow";
     $("bNetwork").textContent = online ? q || "Online" : "Offline";
@@ -604,7 +605,7 @@
     renderOverview(); renderFeed(); renderSkills(); renderTimeline(); renderMemory(); renderConnections(); renderBottom(); renderNav();
     const sys = dash.system || {};
     gauge($("gCpu"), "CPU", sys.cpu); gauge($("gRam"), "RAM", sys.ram); gauge($("gDisk"), "Disk", sys.disk);
-    $("monitorHost").textContent = status.computer_control ? "this computer" : "server";
+    $("monitorHost").textContent = status.mode === "demo" ? "simulated" : status.computer_control ? "this computer" : "server";
   }
 
   async function refresh() {

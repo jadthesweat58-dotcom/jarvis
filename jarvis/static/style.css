@@ -262,7 +262,7 @@ kbd { font: 11px var(--body); color: var(--muted); border: 1px solid var(--line)
 /* ---------- bottom bar ---------- */
 .bottombar {
   position: fixed; left: 236px; right: 0; bottom: 0; z-index: 20; display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px; background: linear-gradient(0deg, rgba(3, 10, 20, 0.97), rgba(4, 14, 26, 0.88)); border-top: 1px solid var(--line);
+  padding: 10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(0deg, rgba(3, 10, 20, 0.97), rgba(4, 14, 26, 0.88)); border-top: 1px solid var(--line);
   backdrop-filter: blur(8px);
 }
 .chip { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); min-width: 0; }
@@ -352,7 +352,7 @@ dialog form { display: flex; flex-direction: column; gap: 12px; }
   .chip:nth-child(3) { display: none; }
 }
 @media (max-width: 640px) {
-  .main { padding: 10px 10px 84px; }
+  .main { padding: 10px 16px 84px; }
   .skill-grid, .conn-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .core-name { font-size: 32px; }
   .chip, .dots, .brief-btn span { display: none; }
