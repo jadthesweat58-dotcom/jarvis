@@ -4,13 +4,15 @@ services:
   - type: web
     name: jarvis
     runtime: docker
-    plan: starter            # a paid plan is needed for the persistent disk below
+    plan: free               # free plans have no lasting disk, so memory lives in Turso (below)
     healthCheckPath: /healthz
-    disk:
-      name: jarvis-data
-      mountPath: /data       # Jarvis's memory database lives here
-      sizeGB: 1
     envVars:
+      # Jarvis's memory: a free Turso database (https://turso.tech). Without these,
+      # Jarvis forgets everything whenever Render restarts it.
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
       - key: JARVIS_PROVIDER
         value: gemini
       - key: GEMINI_API_KEY

@@ -26,27 +26,42 @@ Anything risky (calling or texting someone else, running a command, writing a fi
 
 > Twilio trial accounts can only call and text numbers you have verified in the Twilio console.
 
-## 2. Put Jarvis in the cloud (recommended first)
+## 2. Put Jarvis in the cloud for free (recommended first)
 
-Jarvis ships as a Docker app, so it runs on any host. The easiest is **Render**:
+Jarvis ships as a Docker app, so it runs on any host. This setup costs nothing: **Render**'s free
+plan runs Jarvis, and a free **Turso** database holds its memory (Render's free plan wipes its disk
+on every restart, so the memory lives online instead).
 
-1. Push this repository to GitHub (already done if you're reading this there).
-2. Go to https://dashboard.render.com → **New → Blueprint** → pick this repo. Render reads
-   `render.yaml` and sets everything up, including a disk so Jarvis's memory survives restarts.
-3. Fill in the settings it asks for:
+**A. Create the memory database (Turso, free)**
+1. Sign up at https://turso.tech (you can use your GitHub account).
+2. Create a database, e.g. named `jarvis`.
+3. Copy its **URL** (starts with `libsql://`) and create an **auth token** for it. Keep both.
+
+**B. Deploy Jarvis (Render, free)**
+1. Go to https://dashboard.render.com → **New → Blueprint** → pick this repo. Render reads
+   `render.yaml` and sets everything up.
+2. Fill in the settings it asks for:
    - `GEMINI_API_KEY`: your Gemini key
+   - `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`: from step A
    - `MY_NAME`: what Jarvis calls you
-   - `TIMEZONE`: e.g. `America/New_York`, `Europe/London`, `Asia/Karachi`
-   - `HOME_CITY`: e.g. `London, UK` (for weather)
-   - Twilio values and `MY_PHONE_NUMBER` (optional; format `+15551234567`)
+   - `TIMEZONE`: e.g. `Asia/Dubai`, `Europe/London`, `America/New_York`
+   - `HOME_CITY`: e.g. `Dubai` (for weather)
+   - Twilio values and `MY_PHONE_NUMBER`: optional, leave empty to skip phone calls
    - `PUBLIC_BASE_URL`: leave empty on Render (Jarvis detects its address automatically).
-     On other hosts set it to your https address, e.g. `https://my-jarvis.example.com`.
-4. Deploy. Open your Render URL, and when asked for the **access token**, copy
+3. Deploy. Open your Render URL, and when asked for the **access token**, copy
    `JARVIS_ACCESS_TOKEN` from the service's *Environment* tab (Render generated it for you).
 
+**C. Keep it awake (free)**
+Render's free plan puts Jarvis to sleep after about 15 minutes without visitors, and a sleeping
+Jarvis can't fire reminders. A free monitor such as https://uptimerobot.com can visit
+`https://YOUR-JARVIS-URL/healthz` every 5 minutes to keep it awake.
+
+Want no sleeping and no Turso? Change `plan: free` to `plan: starter` in `render.yaml` (paid) and
+add a disk mounted at `/data` instead.
+
 **Other hosts** (Railway, Fly.io, a VPS…): deploy the `Dockerfile`, set the same environment
-variables (see `.env.example`), set a strong `JARVIS_ACCESS_TOKEN`, set `PUBLIC_BASE_URL`, and
-mount a volume at `/data`.
+variables (see `.env.example`), set a strong `JARVIS_ACCESS_TOKEN` and `PUBLIC_BASE_URL`, and either
+set the Turso values or mount a volume at `/data`.
 
 ### Let people phone Jarvis (optional)
 In the Twilio console → Phone Numbers → your number → **Voice → "A call comes in"** → Webhook →
@@ -61,7 +76,9 @@ Jarvis; anyone else can leave a message, which appears in your feed and notes.
    - **Windows**: double-click `scripts\start.bat`
    - **Mac / Linux**: run `./scripts/start.sh` in a terminal
 4. The first run creates a `.env` file. Open it, paste your `GEMINI_API_KEY`, and set
-   `JARVIS_MODE=local` if you want Jarvis to control your computer. Run the script again.
+   `JARVIS_MODE=local` if you want Jarvis to control your computer. To share memories with your
+   cloud Jarvis, also paste the same `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (if both run at
+   once, reminders may pop up on both). Run the script again.
 5. Your browser opens `http://localhost:8000`. (On your own computer no access token is needed.)
 
 Prefer the terminal? `python -m jarvis.cli` gives you a text chat.

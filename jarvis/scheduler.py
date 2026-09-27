@@ -38,9 +38,9 @@ def fire_due_reminders(ctx: Context) -> int:
 
 
 class ReminderLoop:
-    def __init__(self, ctx: Context, interval: float = 2.0):
+    def __init__(self, ctx: Context, interval: float | None = None):
         self.ctx = ctx
-        self.interval = interval
+        self.interval = interval or ctx.db.poll_interval
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="reminders", daemon=True)
 

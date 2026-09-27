@@ -78,6 +78,8 @@ def utcnow() -> str:
 
 
 class Database:
+    poll_interval = 2.0  # how often the reminder loop checks for due reminders (seconds)
+
     def __init__(self, path: Path | str):
         self.path = str(path)
         if self.path != ":memory:":
@@ -121,3 +123,92 @@ class Database:
 
     def delete_conversation(self, conv_id: str) -> None:
         self.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+
+
+class TursoDatabase(Database):
+    """The same database, kept online in Turso (hosted SQLite) instead of a local
+    file, so a free cloud host that wipes its disk doesn't make Jarvis forget.
+
+    Talks to Turso's "SQL over HTTP" API (/v2/pipeline), so no extra packages
+    are needed.
+    """
+
+    # Checking for due reminders every 2s would waste the free tier's read quota.
+    poll_interval = 15.0
+
+    def __init__(self, url: str, auth_token: str, client: Any = None):
+        import httpx
+
+        base = url.strip().rstrip("/")
+        if base.startswith("libsql://"):
+            base = "https://" + base[len("libsql://"):]
+        self.path = base
+        self._endpoint = base + "/v2/pipeline"
+        self._headers = {"Authorization": f"Bearer {auth_token}"} if auth_token else {}
+        self._http = client or httpx.Client(timeout=20)
+        self._lock = threading.RLock()
+        for statement in SCHEMA.split(";"):
+            if statement.strip():
+                self._run(statement)
+
+    @staticmethod
+    def _encode(value: Any) -> dict:
+        if value is None:
+            return {"type": "null"}
+        if isinstance(value, bool):
+            return {"type": "integer", "value": str(int(value))}
+        if isinstance(value, int):
+            return {"type": "integer", "value": str(value)}
+        if isinstance(value, float):
+            return {"type": "float", "value": value}
+        if isinstance(value, bytes):
+            import base64
+
+            return {"type": "blob", "base64": base64.b64encode(value).decode()}
+        return {"type": "text", "value": str(value)}
+
+    @staticmethod
+    def _decode(value: dict) -> Any:
+        kind = value.get("type")
+        if kind == "integer":
+            return int(value["value"])
+        if kind == "float":
+            return float(value["value"])
+        if kind == "blob":
+            import base64
+
+            return base64.b64decode(value["base64"])
+        return value.get("value")  # text, or None for null
+
+    def _run(self, sql: str, params: tuple | list = ()) -> dict:
+        body = {"requests": [
+            {"type": "execute", "stmt": {"sql": sql, "args": [self._encode(p) for p in params]}},
+            {"type": "close"},
+        ]}
+        with self._lock:
+            resp = self._http.post(self._endpoint, json=body, headers=self._headers)
+        if resp.status_code == 401:
+            raise RuntimeError("Turso rejected the token. Check TURSO_AUTH_TOKEN.")
+        resp.raise_for_status()
+        result = resp.json()["results"][0]
+        if result.get("type") == "error":
+            raise RuntimeError(f"Turso error: {result['error'].get('message')}")
+        return result["response"]["result"]
+
+    def execute(self, sql: str, params: tuple | list = ()) -> int:
+        result = self._run(sql, params)
+        if sql.lstrip().upper().startswith("INSERT"):
+            return int(result.get("last_insert_rowid") or 0)
+        return int(result.get("affected_row_count") or 0)
+
+    def query(self, sql: str, params: tuple | list = ()) -> list[dict[str, Any]]:
+        result = self._run(sql, params)
+        names = [c.get("name") for c in result.get("cols", [])]
+        return [dict(zip(names, (self._decode(v) for v in row))) for row in result.get("rows", [])]
+
+
+def open_database(settings: Any) -> Database:
+    """Turso when TURSO_DATABASE_URL is set, otherwise a local SQLite file."""
+    if settings.turso_database_url:
+        return TursoDatabase(settings.turso_database_url, settings.turso_auth_token)
+    return Database(settings.db_path)
