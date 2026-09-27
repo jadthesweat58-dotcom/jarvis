@@ -106,12 +106,20 @@
     paintIcons($("talkBtn"));
     $("talkBtn").classList.toggle("on", busyVoice);
     $("drawerMic").classList.toggle("on", core.mode === "listening");
-    if (note) $("capJarvis").textContent = note;
+    if (note !== undefined) live(note);
+    else if (core.mode === "idle") live("");
   }
 
   // ------------------------------------------------------------------ conversation
-  const chatLog = $("chatLog");
-  function addMsg(kind, text) {
+  const chatLog = $("chatLog"), boxLog = $("boxLog");
+  // A status line above the chat box input: "Listening…", what you're saying, "Thinking…".
+  const live = (text) => { $("capUser").textContent = text || ""; };
+  function addMsg(kind, text, mirror = true) {
+    if (mirror) {  // the dashboard chat box shows the recent conversation
+      boxLog.appendChild(el("div", `msg ${kind}`, text));
+      while (boxLog.children.length > 40) boxLog.firstChild.remove();
+      boxLog.scrollTop = boxLog.scrollHeight;
+    }
     const m = el("div", `msg ${kind}`, text);
     chatLog.appendChild(m);
     $("drawerBody").scrollTop = 1e9;
@@ -131,7 +139,7 @@
     const caps = $("capActions");
     caps.innerHTML = "";
     for (const a of actions || []) {
-      approvalButtons(a, addMsg("system", `Approval needed: ${a.summary}`));
+      approvalButtons(a, addMsg("system", `Approval needed: ${a.summary}`, false));
       const box = el("div", "approval");
       box.appendChild(el("span", "", a.summary));
       approvalButtons(a, box);
@@ -141,8 +149,7 @@
 
   async function handleReply(data, userText) {
     addMsg("jarvis", data.reply);
-    $("capJarvis").textContent = data.reply;
-    if (userText) $("capUser").textContent = `“${userText}”`;
+    live("");
     showApprovals(data.actions);
     refresh();
     await speak(data.reply);
@@ -153,13 +160,12 @@
     text = (text || "").trim();
     if (!text) return;
     addMsg("user", text);
-    $("capUser").textContent = `“${text}”`;
     busy = true;
-    setMode("thinking", "…");
+    setMode("thinking", "Jarvis is thinking…");
     try {
       await handleReply(await api("/api/chat", { text }), text);
     } catch (e) {
-      if (e.message !== "locked") { addMsg("system", e.message); toast(e.message, true); $("capJarvis").textContent = ""; }
+      if (e.message !== "locked") { addMsg("system", e.message); toast(e.message, true); live(""); }
     } finally {
       busy = false;
       if (core.mode === "thinking") setMode("idle");
@@ -179,6 +185,7 @@
   }
 
   $("askForm").addEventListener("submit", (e) => { e.preventDefault(); const v = $("ask").value; $("ask").value = ""; send(v); });
+  $("boxForm").addEventListener("submit", (e) => { e.preventDefault(); const v = $("boxInput").value; $("boxInput").value = ""; send(v); });
   $("drawerForm").addEventListener("submit", (e) => { e.preventDefault(); const v = $("drawerInput").value; $("drawerInput").value = ""; send(v); });
 
   // ------------------------------------------------------------------ drawer: conversation, lists, notifications
@@ -259,7 +266,9 @@
   $("newChat").onclick = async () => {
     await api("/api/reset", {});
     chatLog.innerHTML = "";
-    $("capUser").textContent = ""; $("capJarvis").textContent = "New conversation started.";
+    boxLog.innerHTML = "";
+    live("");
+    addMsg("system", "New conversation started.");
     refresh();
   };
   $("lockBtn").onclick = () => { store.del("jarvis-token"); token = ""; location.reload(); };
@@ -373,7 +382,7 @@
       failures = 0;
       const result = e.results[e.results.length - 1];
       const said = result[0].transcript.trim();
-      if (!result.isFinal) { if (!continuous || awaitingCommand) $("capUser").textContent = `“${said}…”`; return; }
+      if (!result.isFinal) { if (!continuous || awaitingCommand) live(`“${said}…”`); return; }
       if (!continuous) { send(said); return; }
       onWakeResult(said);
     };
@@ -418,7 +427,7 @@
 
   function talkOrStop() {
     if (core.mode === "speaking") return stopSpeaking();
-    if (core.mode === "listening") { stopRecognition(); setMode("idle", "Standing by."); return; }
+    if (core.mode === "listening") { stopRecognition(); setMode("idle"); return; }
     utteranceId++;
     stopAudio();
     startRecognition(false);
@@ -722,7 +731,6 @@
       if (!chatLog.children.length) {
         const hello = `Good to see you, ${status.name}. How can I help?`;
         addMsg("jarvis", hello);
-        $("capJarvis").textContent = hello;
       }
       await refresh();
       pollSystem();

@@ -84,13 +84,16 @@
       </button>
     </section>
 
-    <section class="transcript">
-      <div class="said">
-        <div class="said-user" id="capUser"></div>
-        <div class="said-jarvis" id="capJarvis">Standing by.</div>
-        <div class="said-actions" id="capActions"></div>
-      </div>
-      <button class="talk" id="talkBtn"><i data-icon="mic" id="talkIcon"></i><span id="talkLabel">Talk</span></button>
+    <section class="chatbox" aria-label="Chat with Jarvis">
+      <div class="chat-head"><span>CONVERSATION</span><span class="rule"></span><button class="link" data-open="chat">Full history</button></div>
+      <div class="box-log" id="boxLog" aria-live="polite"></div>
+      <div class="said-actions" id="capActions"></div>
+      <div class="box-live" id="capUser"></div>
+      <form class="box-input" id="boxForm">
+        <input id="boxInput" autocomplete="off" placeholder="Message Jarvis…" aria-label="Message Jarvis">
+        <button type="submit" class="send">Send</button>
+        <button type="button" class="talk" id="talkBtn"><i data-icon="mic" id="talkIcon"></i><span id="talkLabel">Talk</span></button>
+      </form>
     </section>
 
     <section class="timeline" aria-label="Mission timeline">
