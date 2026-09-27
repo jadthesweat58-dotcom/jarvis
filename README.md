@@ -104,6 +104,26 @@ Prefer the terminal? `python -m jarvis.cli` gives you a text chat.
   - "Give me my executive briefing."
   - (local mode) "Open Spotify" / "What's in my Downloads folder?"
 
+## Clap twice to open Jarvis (your own computer)
+
+Like Tony Stark: clap twice and Jarvis opens in your browser and greets you out loud.
+
+1. Set up Jarvis on your computer (section 3), or just clone the repo if you only want to open
+   your cloud Jarvis: then set `JARVIS_URL=https://your-jarvis.onrender.com` in `.env`.
+2. Start the clap listener:
+   - **Mac**: double-click `scripts/clap.command` (the first time macOS asks to let Terminal use
+     the microphone: click **Allow**)
+   - **Windows**: double-click `scripts\clap.bat`
+3. Clap twice, about a quarter to half a second apart.
+
+Tuning: run `scripts/clap.command --test` to see when it hears claps without opening anything,
+or `--levels` to watch the sound level. Set `CLAP_SENSITIVITY` (1-10, default 5) in `.env`:
+higher hears quieter claps. To have it always ready, add the script to your Mac's
+**Login Items** (System Settings > General) or Windows' Startup folder.
+
+Privacy: the microphone is only checked for the clap pattern, a tiny slice at a time; nothing
+is recorded, saved or sent anywhere.
+
 ## Jarvis's voice (ElevenLabs, optional)
 
 By default Jarvis speaks with your browser's built-in voice. For a realistic voice:

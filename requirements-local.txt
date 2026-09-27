@@ -1,0 +1,4 @@
+-r requirements.txt
+# Only needed on your own computer: clap-to-open listens to the microphone.
+numpy>=1.26
+sounddevice>=0.4
