@@ -200,8 +200,26 @@ i[data-icon] svg { width: 100%; height: 100%; fill: none; stroke: currentColor; 
 .panel-head em { font-style: normal; letter-spacing: 0; font-size: 12.5px; color: var(--muted); }
 
 .tasks { flex: 1; display: flex; flex-direction: column; min-height: 320px; }
-.task-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; flex: 1; overflow-y: auto; }
-.task { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start; padding: 11px 0; }
+.task-list {
+  list-style: none; margin: 0; padding: 10px 4px 10px 0; display: flex; flex-direction: column; gap: 8px;
+  flex: 1; overflow-y: auto;
+}
+/* Each task is a card with a priority stripe down its left edge. */
+.task {
+  --stripe: #2a6fa8;
+  display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 4px 10px; align-items: start;
+  padding: 12px 12px 12px 14px; border: 1px solid var(--line-2); border-radius: 12px;
+  background: linear-gradient(180deg, rgba(20, 44, 66, 0.55), rgba(13, 30, 46, 0.55));
+  box-shadow: inset 3px 0 0 var(--stripe);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s;
+}
+.task.pr-high { --stripe: var(--accent); }
+.task.pr-low { --stripe: var(--muted); }
+.task:hover {
+  border-color: var(--accent-2); transform: translateY(-1px);
+  box-shadow: inset 3px 0 0 var(--stripe), 0 0 16px rgba(58, 166, 255, 0.18);
+}
+.task.done { opacity: 0.55; background: rgba(12, 26, 40, 0.5); --stripe: var(--line-2); }
 .check { width: 19px; height: 19px; margin-top: 2px; border-radius: 50%; border: 1.5px solid var(--muted); display: grid; place-items: center; }
 .check:hover { border-color: var(--accent); }
 .task.done .check { background: var(--accent); border-color: var(--accent); }
@@ -213,7 +231,7 @@ i[data-icon] svg { width: 100%; height: 100%; fill: none; stroke: currentColor; 
 .badge.high { background: #0f4a78; color: #e6f4ff; }
 .badge.med { border: 1px solid var(--accent); color: var(--accent); }
 .badge.low { background: #15222f; color: var(--text-2); }
-.task-list .empty { color: var(--muted); padding: 14px 0; }
+.task-list .empty { color: var(--muted); padding: 14px; border: 1px dashed var(--line-2); border-radius: 12px; }
 .task-add { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); margin-top: 8px; }
 .task-add input, .task-add select, .drawer-input input, dialog input {
   min-width: 0; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg-2); outline: none;
@@ -267,7 +285,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.7); }
 dialog form { display: flex; flex-direction: column; gap: 12px; }
 
 @keyframes rise { from { transform: translateY(8px); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .task:hover { transform: none; } }
 
 /* ---------------------------------------------------------------- responsive */
 @media (max-width: 1280px) {

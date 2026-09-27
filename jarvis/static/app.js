@@ -452,11 +452,11 @@
     $("taskCount").textContent = `${open} open · ${tasks.length - open} done`;
     if (!tasks.length) list.appendChild(el("li", "empty", 'No tasks yet. Add one below, or say "Jarvis, add a task…"'));
     for (const t of tasks) {
-      const li = el("li", `task${t.done ? " done" : ""}`);
+      const pr = ["high", "med", "low"].includes(t.priority) ? t.priority : "med";
+      const li = el("li", `task pr-${pr}${t.done ? " done" : ""}`);
       const check = el("button", "check");
       check.setAttribute("aria-label", t.done ? `Mark "${t.task}" not done` : `Mark "${t.task}" done`);
       check.onclick = () => toggleTask(t);
-      const pr = ["high", "med", "low"].includes(t.priority) ? t.priority : "med";
       li.append(check, el("div", "task-title", t.task), el("span", `badge ${pr}`, pr[0].toUpperCase() + pr.slice(1)));
       if (t.due) li.appendChild(el("div", "task-sub", `due ${t.due}`));
       list.appendChild(li);
