@@ -8,7 +8,7 @@
   "use strict";
 
   // ---------------------------------------------------------------- storage
-  const KEY = "jarvis-demo-state-v1";
+  const KEY = "jarvis-demo-state-v2";
   const now = () => new Date();
   const iso = (d) => d.toISOString();
   const inMinutes = (m) => iso(new Date(Date.now() + m * 60000));
@@ -22,10 +22,16 @@
       ],
       notes: [{ id: 3, title: "Jarvis ideas", body: "Morning briefing, call reminders, smart home later." }],
       todos: [
-        { id: 4, task: "Add my Anthropic API key", due: "", done: 0 },
-        { id: 5, task: "Deploy Jarvis to Render", due: "", done: 0 },
+        { id: 4, task: "Add my Gemini API key", due: "", priority: "high", done: 0 },
+        { id: 5, task: "Deploy Jarvis to Render", due: "today", priority: "high", done: 0 },
+        { id: 8, task: "Set up UptimeRobot monitor", due: "", priority: "med", done: 0 },
+        { id: 9, task: "Create Supabase project", due: "", priority: "med", done: 1 },
       ],
-      reminders: [{ id: 6, message: "Try asking Jarvis for a briefing", due_at: inMinutes(45), status: "pending" }],
+      reminders: [
+        { id: 10, message: "Morning briefing", due_at: inMinutes(-90), status: "fired" },
+        { id: 6, message: "Try asking Jarvis for a briefing", due_at: inMinutes(45), status: "pending" },
+        { id: 11, message: "Evening walk", due_at: inMinutes(180), status: "pending" },
+      ],
       contacts: [{ id: 7, name: "Mom", phone: "+15551234567", relationship: "mother" }],
       calls: [],
       actions: [],
@@ -73,6 +79,9 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
 
   // ---------------------------------------------------------------- tools
   const byId = (list, id) => list.find((x) => x.id === Number(id));
+  const PRI = { high: 0, med: 1, low: 2 };
+  const STARTED = iso(new Date(Date.now() - 3 * 3600 * 1000));
+  const startOfDay = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; };
   const findContact = (who) => {
     const w = String(who || "").trim().toLowerCase();
     if (/^\+\d{7,15}$/.test(w.replace(/[\s()-]/g, ""))) return { name: who, phone: w.replace(/[\s()-]/g, "") };
@@ -114,8 +123,8 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
         const rows = state.notes.filter((n) => !q || (n.title + " " + n.body).toLowerCase().includes(q)).slice(0, 10);
         return rows.length ? rows.map((n) => `#${n.id} ${n.title}: ${n.body}`).join("\n") : "No notes found.";
       }),
-      t("add_todo", "Add a task to the to-do list.", { task: str, due: str }, ["task"], (a) => {
-        const td = { id: newId(), task: String(a.task), due: String(a.due || ""), done: 0 };
+      t("add_todo", "Add a task to the to-do list.", { task: str, due: str, priority: { type: "string", enum: ["high", "med", "low"] } }, ["task"], (a) => {
+        const td = { id: newId(), task: String(a.task), due: String(a.due || ""), priority: ["high", "med", "low"].includes(a.priority) ? a.priority : "med", done: 0 };
         state.todos.push(td);
         return `Added to-do #${td.id}.`;
       }),
@@ -272,7 +281,7 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
   const routes = {
     "GET /api/status": () => ({
       name: "Commander", mode: "demo", model: "Claude (claude.ai)", phone: false, computer_control: false,
-      two_way_calls: false, ai_name: "Claude (demo)", ai_ready: sampleState !== "absent" && sampleState !== "declined", web_search: false,
+      two_way_calls: false, started_at: STARTED, ai_name: "Claude (demo)", ai_ready: sampleState !== "absent" && sampleState !== "declined", web_search: false,
       home_city: "", timezone: tz,
     }),
     "GET /api/dashboard": () => ({
@@ -280,12 +289,26 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
         .sort((a, b) => a.due_at.localeCompare(b.due_at)).slice(0, 10)
         .map((r) => ({ id: r.id, message: r.message, due_at: r.due_at, due_local: new Date(r.due_at).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) })),
       todos: state.todos.filter((x) => !x.done).map(({ id, task, due }) => ({ id, task, due })),
+      tasks: [...state.todos].sort((a, b) => a.done - b.done || PRI[a.priority] - PRI[b.priority] || b.id - a.id)
+        .map(({ id, task, due, priority, done }) => ({ id, task, due, priority: priority || "med", done })),
+      timeline: state.reminders.filter((r) => r.status !== "cancelled" && new Date(r.due_at) >= startOfDay())
+        .sort((a, b) => a.due_at.localeCompare(b.due_at))
+        .map((r) => ({ id: r.id, message: r.message, due_at: r.due_at, status: r.status,
+                       time_local: new Date(r.due_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) })),
       actions: state.actions.filter((a) => a.status === "pending").map(({ id, summary }) => ({ id, summary })),
       facts: state.facts.length,
       counts: counts(),
       system: system(),
       feed: state.feed,
     }),
+    "GET /api/system": () => system(),
+    "POST /api/todos": (body) => {
+      const task = String((body && body.task) || "").trim();
+      if (!task) return [400, { detail: "The task is empty." }];
+      state.todos.push({ id: newId(), task, due: "", priority: ["high", "med", "low"].includes(body.priority) ? body.priority : "med", done: 0 });
+      save();
+      return { ok: true };
+    },
     "GET /api/weather": () => ({ available: false, label: "Full version", reason: "Weather needs the full Jarvis server." }),
     "POST /api/reset": () => { state.history = []; save(); return { ok: true }; },
     "POST /api/chat": async (body) => {
@@ -340,8 +363,13 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
       let out;
       const list = url.pathname.match(/^\/api\/list\/(\w+)$/);
       const action = url.pathname.match(/^\/api\/actions\/(\d+)$/);
+      const todo = url.pathname.match(/^\/api\/todos\/(\d+)$/);
       if (list && method === "GET") out = lists[list[1]] ? lists[list[1]]() : [404, { detail: "Unknown list." }];
       else if (action && method === "POST") out = await resolveAction(Number(action[1]), !!(body && body.approve));
+      else if (todo && method === "POST") {
+        const td = byId(state.todos, todo[1]);
+        if (td) { td.done = body && body.done ? 1 : 0; save(); out = { ok: true }; } else out = [404, { detail: "No such task." }];
+      }
       else if (routes[`${method} ${url.pathname}`]) out = await routes[`${method} ${url.pathname}`](body);
       else out = [404, { detail: "Not found." }];
       return Array.isArray(out) && typeof out[0] === "number" ? json(out[0], out[1]) : json(200, out);

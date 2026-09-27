@@ -13,7 +13,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -46,6 +46,15 @@ class ActionIn(BaseModel):
     approve: bool
 
 
+class TaskIn(BaseModel):
+    task: str
+    priority: str = "med"
+
+
+class DoneIn(BaseModel):
+    done: bool
+
+
 def contact_call_prompt(ctx: Context, call: dict) -> str:
     owner = ctx.settings.my_name
     who = call["contact_name"] or "the caller"
@@ -71,6 +80,7 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     feed: deque[dict] = deque(maxlen=30)  # recent notifications, for the live feed
     ctx.notifier.subscribe(feed.appendleft)
     weather_cache: dict[str, Any] = {}
+    started_at = utcnow()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -161,7 +171,7 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
                 "phone": s.twilio_enabled, "computer_control": s.is_local,
                 "two_way_calls": s.twilio_enabled and bool(s.public_base_url),
                 "ai_name": s.provider_name, "ai_ready": bool(s.ai_key), "web_search": bool(s.ai_key),
-                "home_city": s.home_city, "timezone": s.timezone}
+                "home_city": s.home_city, "timezone": s.timezone, "started_at": started_at}
 
     @app.post("/api/chat", dependencies=[Depends(require_user)])
     def chat(body: ChatIn) -> dict[str, Any]:
@@ -187,33 +197,57 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     @app.get("/api/dashboard", dependencies=[Depends(require_user)])
     def dashboard() -> dict[str, Any]:
         tz = ctx.settings.tz
+        local = lambda iso: datetime.fromisoformat(iso).astimezone(tz)  # noqa: E731
         reminders = ctx.db.query(
             "SELECT id, message, due_at FROM reminders WHERE status = 'pending' ORDER BY due_at LIMIT 10")
         for r in reminders:
-            r["due_local"] = datetime.fromisoformat(r["due_at"]).astimezone(tz).strftime("%a %H:%M")
-        count = lambda sql: ctx.db.one(sql)["n"]  # noqa: E731
-        blocks = [b for m in main_brain.messages if isinstance(m.get("content"), list) for b in m["content"]]
+            r["due_local"] = local(r["due_at"]).strftime("%a %H:%M")
+        # Today's reminders, done and upcoming, for the mission timeline.
+        midnight = datetime.now(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        timeline = ctx.db.query(
+            "SELECT id, message, due_at, status FROM reminders WHERE due_at >= ? AND status <> 'cancelled' "
+            "ORDER BY due_at LIMIT 12", (midnight.astimezone(timezone.utc).isoformat(timespec="seconds"),))
+        for r in timeline:
+            r["time_local"] = local(r["due_at"]).strftime("%H:%M")
+        # One round trip for every count (matters when the database is online).
+        counts = ctx.db.one(
+            "SELECT (SELECT COUNT(*) FROM facts) AS facts, (SELECT COUNT(*) FROM notes) AS notes, "
+            "(SELECT COUNT(*) FROM todos WHERE done = 0) AS todos, "
+            "(SELECT COUNT(*) FROM todos WHERE done = 1) AS todos_done, "
+            "(SELECT COUNT(*) FROM reminders WHERE status = 'pending') AS reminders, "
+            "(SELECT COUNT(*) FROM contacts) AS contacts, (SELECT COUNT(*) FROM phone_calls) AS calls")
+        counts = {k: int(v or 0) for k, v in counts.items()}
+        turns, tool_calls = conversation_stats(main_brain.messages)
+        counts.update(turns=turns, tool_calls=tool_calls, tools=len(main_brain.tools) + (
+            0 if any(t.name == "web_search" for t in main_brain.tools) else 1))
         return {
             "reminders": reminders,
-            "todos": ctx.db.query("SELECT id, task, due FROM todos WHERE done = 0 ORDER BY id LIMIT 10"),
+            "timeline": timeline,
+            "todos": [t for t in tasks() if not t["done"]][:10],
+            "tasks": tasks(),
             "actions": ctx.db.query(
                 "SELECT id, summary FROM pending_actions WHERE status = 'pending' ORDER BY id"),
-            "facts": count("SELECT COUNT(*) AS n FROM facts"),
-            "counts": {
-                "facts": count("SELECT COUNT(*) AS n FROM facts"),
-                "notes": count("SELECT COUNT(*) AS n FROM notes"),
-                "todos": count("SELECT COUNT(*) AS n FROM todos WHERE done = 0"),
-                "reminders": count("SELECT COUNT(*) AS n FROM reminders WHERE status = 'pending'"),
-                "contacts": count("SELECT COUNT(*) AS n FROM contacts"),
-                "calls": count("SELECT COUNT(*) AS n FROM phone_calls"),
-                "turns": sum(1 for m in main_brain.messages if m["role"] == "user"
-                             and any(b.get("type") == "text" for b in m["content"])),
-                "tool_calls": sum(1 for b in blocks if b.get("type") in ("tool_use", "server_tool_use")),
-                "tools": len(available_tools(ctx.settings)) + 1,  # +1 for web search
-            },
+            "facts": counts["facts"],
+            "counts": counts,
             "system": system_stats(),
             "feed": list(feed),
         }
+
+    def tasks() -> list[dict[str, Any]]:
+        return ctx.db.query(
+            "SELECT id, task, due, priority, done FROM todos ORDER BY done, "
+            "CASE priority WHEN 'high' THEN 0 WHEN 'med' THEN 1 ELSE 2 END, id DESC LIMIT 30")
+
+    def conversation_stats(messages: list[dict]) -> tuple[int, int]:
+        """(user turns, tool calls) in a Claude- or Gemini-format history."""
+        turns = tool_calls = 0
+        for m in messages:
+            blocks = m.get("content") if isinstance(m.get("content"), list) else m.get("parts") or []
+            if m.get("role") == "user" and any(b.get("type") == "text" or "text" in b for b in blocks):
+                turns += 1
+            tool_calls += sum(1 for b in blocks if b.get("type") in ("tool_use", "server_tool_use")
+                              or "function_call" in b)
+        return turns, tool_calls
 
     def system_stats() -> dict[str, float]:
         try:
@@ -226,6 +260,25 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             }
         except Exception:
             return {}
+
+    @app.get("/api/system", dependencies=[Depends(require_user)])
+    def system() -> dict[str, float]:
+        return system_stats()
+
+    @app.post("/api/todos", dependencies=[Depends(require_user)])
+    def add_task(body: TaskIn) -> dict[str, Any]:
+        from jarvis.tools.notes import add_todo
+
+        try:
+            return {"ok": True, "result": add_todo(ctx, {"task": body.task, "priority": body.priority})}
+        except ToolError as exc:
+            raise HTTPException(400, str(exc)) from exc
+
+    @app.post("/api/todos/{todo_id}", dependencies=[Depends(require_user)])
+    def set_task_done(todo_id: int, body: DoneIn) -> dict[str, bool]:
+        if not ctx.db.execute("UPDATE todos SET done = ? WHERE id = ?", (int(body.done), todo_id)):
+            raise HTTPException(404, "No such task.")
+        return {"ok": True}
 
     @app.get("/api/list/{kind}", dependencies=[Depends(require_user)])
     def list_items(kind: str) -> list[dict[str, Any]]:

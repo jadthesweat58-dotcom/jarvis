@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS todos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     task TEXT NOT NULL,
     due TEXT,
+    priority TEXT NOT NULL DEFAULT 'med',  -- high | med | low
     done INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
@@ -73,6 +74,12 @@ CREATE TABLE IF NOT EXISTS phone_calls (
 """
 
 
+# Columns added after the first release; added to existing databases on startup.
+MIGRATIONS = [
+    "ALTER TABLE todos ADD COLUMN priority TEXT NOT NULL DEFAULT 'med'",
+]
+
+
 def utcnow() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -90,6 +97,14 @@ class Database:
         with self._lock:
             self._conn.executescript(SCHEMA)
             self._conn.commit()
+        self.migrate()
+
+    def migrate(self) -> None:
+        for statement in MIGRATIONS:
+            try:
+                self.execute(statement)
+            except Exception:
+                pass  # the column already exists
 
     def execute(self, sql: str, params: tuple | list = ()) -> int:
         """Run a write statement. Returns the new row id for an INSERT, otherwise
@@ -150,6 +165,7 @@ class TursoDatabase(Database):
         for statement in SCHEMA.split(";"):
             if statement.strip():
                 self._run(statement)
+        self.migrate()
 
     @staticmethod
     def _encode(value: Any) -> dict:
@@ -226,6 +242,7 @@ class PostgresDatabase(Database):
         for statement in schema.split(";"):
             if statement.strip():
                 self._run(statement, (), fetch=False)
+        self.migrate()
 
     def _connect(self):
         import psycopg

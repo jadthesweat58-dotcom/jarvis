@@ -5,6 +5,8 @@ from __future__ import annotations
 from jarvis.db import utcnow
 from jarvis.tools import Context, ToolError, tool
 
+PRIORITIES = ("high", "med", "low")
+
 
 @tool(
     "add_note",
@@ -52,14 +54,19 @@ def delete_note(ctx: Context, args: dict) -> str:
     "Add a task to the user's to-do list.",
     {
         "task": {"type": "string"},
-        "due": {"type": "string", "description": "Optional due date, e.g. 2026-10-01."},
+        "due": {"type": "string", "description": "Optional due date or time, e.g. 2026-10-01 or 'Thursday'."},
+        "priority": {"type": "string", "enum": ["high", "med", "low"], "description": "Default: med."},
     },
     ["task"],
 )
 def add_todo(ctx: Context, args: dict) -> str:
+    task = str(args.get("task") or "").strip()
+    if not task:
+        raise ToolError("The task is empty.")
+    priority = args.get("priority") if args.get("priority") in PRIORITIES else "med"
     todo_id = ctx.db.execute(
-        "INSERT INTO todos (task, due, created_at) VALUES (?, ?, ?)",
-        (args["task"].strip(), args.get("due") or None, utcnow()),
+        "INSERT INTO todos (task, due, priority, created_at) VALUES (?, ?, ?, ?)",
+        (task, args.get("due") or None, priority, utcnow()),
     )
     return f"Added to-do #{todo_id}."
 
@@ -80,7 +87,7 @@ def list_todos(ctx: Context, args: dict) -> str:
     for r in rows:
         mark = "x" if r["done"] else " "
         due = f" (due {r['due']})" if r["due"] else ""
-        lines.append(f"[{mark}] #{r['id']} {r['task']}{due}")
+        lines.append(f"[{mark}] #{r['id']} {r['task']}{due} [{r.get('priority') or 'med'}]")
     return "\n".join(lines)
 
 

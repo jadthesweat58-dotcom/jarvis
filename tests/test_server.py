@@ -136,3 +136,42 @@ def test_signature_accepts_https_behind_proxy(phone_ctx):
     sig = RequestValidator("secret").compute_signature(url, form)
     r = client.post("/twilio/voice", data=form, headers={"X-Twilio-Signature": sig, "X-Forwarded-Proto": "https"})
     assert r.status_code == 200 and 'action="https://localhost/twilio/gather' in r.text
+
+
+def test_tasks_timeline_and_system(ctx):
+    from datetime import datetime, timedelta, timezone
+
+    client = make_client(ctx, FakeClaude())
+    assert client.post("/api/todos", json={"task": "Ship HUD", "priority": "high"}).json()["ok"]
+    assert client.post("/api/todos", json={"task": "Nap", "priority": "bogus"}).json()["ok"]
+    assert client.post("/api/todos", json={"task": "  "}).status_code == 400
+    tasks = client.get("/api/dashboard").json()["tasks"]
+    assert [(t["task"], t["priority"], t["done"]) for t in tasks] == [("Ship HUD", "high", 0), ("Nap", "med", 0)]
+    assert client.post(f"/api/todos/{tasks[0]['id']}", json={"done": True}).json() == {"ok": True}
+    assert client.post("/api/todos/999", json={"done": True}).status_code == 404
+    data = client.get("/api/dashboard").json()
+    assert data["tasks"][-1]["task"] == "Ship HUD" and data["tasks"][-1]["done"] == 1
+    assert data["counts"]["todos"] == 1 and data["counts"]["todos_done"] == 1
+
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(timespec="seconds")
+    ctx.db.execute("INSERT INTO reminders (message, due_at, created_at) VALUES ('Standup', ?, 'x')", (soon,))
+    timeline = client.get("/api/dashboard").json()["timeline"]
+    assert timeline[0]["message"] == "Standup" and timeline[0]["status"] == "pending" and timeline[0]["time_local"]
+    assert set(client.get("/api/system").json()) >= {"cpu", "ram"}
+    assert client.get("/api/status").json()["started_at"]
+
+
+def test_priority_column_added_to_old_databases(tmp_path):
+    import sqlite3
+
+    from jarvis.db import Database
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE todos (id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT NOT NULL, due TEXT, "
+                "done INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)")
+    old.execute("INSERT INTO todos (task, created_at) VALUES ('old task', 'x')")
+    old.commit()
+    old.close()
+    db = Database(path)
+    assert db.one("SELECT task, priority FROM todos") == {"task": "old task", "priority": "med"}

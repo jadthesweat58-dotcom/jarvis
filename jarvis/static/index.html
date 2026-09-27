@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>JARVIS Command Center</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='none' stroke='%2319d3ff' stroke-width='8'/><circle cx='50' cy='50' r='16' fill='%2319d3ff'/></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='none' stroke='%233aa6ff' stroke-width='8'/><circle cx='50' cy='50' r='14' fill='%233aa6ff'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -15,180 +15,135 @@
 
   <!-- ============ SIDEBAR ============ -->
   <aside class="sidebar">
-    <div class="logo">
-      <div class="logo-mark"><span></span></div>
+    <div class="brand">
+      <span class="brand-mark"><span></span></span>
       <div>
-        <div class="logo-name">JARVIS</div>
-        <div class="logo-sub">COMMAND CENTER</div>
+        <div class="brand-name">JARVIS</div>
+        <div class="brand-sub">COMMAND CENTER</div>
       </div>
     </div>
 
-    <nav class="nav" id="nav">
-      <button class="active" data-view="dashboard"><i data-icon="grid"></i>Command Center</button>
-      <button data-view="chat"><i data-icon="message"></i>Conversation<b id="navTurns"></b></button>
-      <button data-view="todos"><i data-icon="check"></i>Tasks<b id="navTodos"></b></button>
-      <button data-view="reminders"><i data-icon="calendar"></i>Reminders<b id="navReminders"></b></button>
-      <button data-view="facts"><i data-icon="database"></i>Memory<b id="navFacts"></b></button>
-      <button data-view="notes"><i data-icon="file"></i>Notes<b id="navNotes"></b></button>
-      <button data-view="contacts"><i data-icon="users"></i>Contacts<b id="navContacts"></b></button>
-      <button data-view="calls"><i data-icon="phone"></i>Phone Calls<b id="navCalls"></b></button>
-      <button data-view="tools"><i data-icon="tool"></i>Tools &amp; Skills<b id="navTools"></b></button>
+    <nav class="nav" id="nav" aria-label="Sections">
+      <button class="active" data-view="dashboard"><i data-icon="grid"></i><span>Command Center</span></button>
+      <button data-view="chat"><i data-icon="message"></i><span>Conversations</span><b id="navTurns"></b></button>
+      <button data-view="todos"><i data-icon="file"></i><span>Tasks</span><b id="navTodos"></b></button>
+      <button data-view="reminders"><i data-icon="calendar"></i><span>Reminders</span><b id="navReminders"></b></button>
+      <button data-view="facts"><i data-icon="database"></i><span>Memory</span><b id="navFacts"></b></button>
+      <button data-view="notes"><i data-icon="book"></i><span>Notes</span><b id="navNotes"></b></button>
+      <button data-view="contacts"><i data-icon="users"></i><span>Contacts</span><b id="navContacts"></b></button>
+      <button data-view="calls"><i data-icon="phone"></i><span>Phone Calls</span><b id="navCalls"></b></button>
+      <button data-view="tools"><i data-icon="tool"></i><span>Tools &amp; Skills</span><b id="navTools"></b></button>
     </nav>
 
-    <div class="card voice-card">
-      <div class="card-title">VOICE STATUS <span class="chev">›</span></div>
-      <div class="wave big" id="sideWave"></div>
-      <div class="voice-state" id="voiceState">Standing by</div>
-      <button class="mic-orb" id="micOrb" aria-label="Tap to speak"><i data-icon="mic"></i></button>
-      <div class="voice-hint">Tap to Speak</div>
-    </div>
-    <button class="focus-btn" id="wakeBtn"><i data-icon="zap"></i><span>Wake Word: Off</span></button>
+    <section class="voice-link">
+      <div class="vl-head"><span>VOICE LINK</span><em id="voiceState">Standby</em></div>
+      <button class="operator" id="operatorBtn" title="Talk to Jarvis">
+        <span class="avatar"><i data-icon="user"></i></span>
+        <span><strong id="opName">Operator</strong><small id="opSub">Clearance · Owner</small></span>
+      </button>
+    </section>
   </aside>
 
-  <!-- ============ MAIN ============ -->
-  <div class="main">
+  <!-- ============ CENTER ============ -->
+  <main class="center">
     <header class="topbar">
-      <div class="sys-pill"><span>SYSTEM STATUS</span><em id="sysStatus"><i class="dot"></i>CONNECTING</em></div>
       <div class="clock">
         <div id="date">—</div>
         <div id="time">--:--:--</div>
       </div>
-      <div class="top-right">
-        <form class="search" id="askForm">
-          <i data-icon="search"></i>
-          <input id="ask" autocomplete="off" placeholder="Ask Jarvis anything…" aria-label="Ask Jarvis">
-          <kbd>↵</kbd>
-        </form>
-        <button class="icon-btn" id="chatBtn" title="Conversation"><i data-icon="message"></i></button>
-        <button class="icon-btn" id="bellBtn" title="Notifications"><i data-icon="bell"></i><b id="bellCount"></b></button>
-        <button class="icon-btn" id="gearBtn" title="Settings"><i data-icon="settings"></i></button>
-        <div class="operator">
-          <div><strong id="opName">Operator</strong><small>Commander</small></div>
-          <span class="avatar"><i data-icon="user"></i></span>
-        </div>
-        <div class="menu" id="menu" hidden>
-          <label><input type="checkbox" id="speakToggle" checked> Speak replies out loud</label>
-          <label><input type="checkbox" id="wakeToggle"> "Hey Jarvis" wake word</label>
-          <button id="newChat">Start a new conversation</button>
-          <button id="lockBtn">Lock (forget access token)</button>
-        </div>
+      <div class="pill" id="sysPill"><i class="dot"></i><span id="sysStatus">Connecting…</span></div>
+      <form class="search" id="askForm" role="search">
+        <i data-icon="search"></i>
+        <input id="ask" autocomplete="off" placeholder="Ask or search…" aria-label="Ask Jarvis">
+      </form>
+      <button class="icon-btn" id="bellBtn" title="Notifications" aria-label="Notifications"><i data-icon="bell"></i><b id="bellCount"></b></button>
+      <button class="icon-btn" id="gearBtn" title="Settings" aria-label="Settings"><i data-icon="settings"></i></button>
+      <div class="menu" id="menu" hidden>
+        <label><input type="checkbox" id="speakToggle" checked> Speak replies out loud</label>
+        <label><input type="checkbox" id="wakeToggle"> "Hey Jarvis" wake word</label>
+        <button id="newChat" type="button">Start a new conversation</button>
+        <button id="lockBtn" type="button">Lock (forget access token)</button>
       </div>
     </header>
 
-    <main class="grid">
-      <!-- Row 1 -->
-      <section class="card overview">
-        <div class="card-title">AI CORE OVERVIEW</div>
-        <ul class="ov-list" id="overview"></ul>
-      </section>
+    <section class="core" aria-label="AI core">
+      <dl class="stats left">
+        <div><dt>MODEL</dt><dd id="stModel">—</dd></div>
+        <div><dt>LATENCY</dt><dd id="stLatency">—</dd></div>
+        <div><dt>MEMORY</dt><dd id="stMemory">—</dd></div>
+      </dl>
+      <dl class="stats right">
+        <div><dt>SKILLS</dt><dd id="stSkills">—</dd></div>
+        <div><dt>LINK</dt><dd id="stLink">—</dd></div>
+        <div><dt>UPTIME</dt><dd id="stUptime">—</dd></div>
+      </dl>
+      <canvas id="ring" aria-hidden="true"></canvas>
+      <button class="core-label" id="coreBtn" title="Tap to talk">
+        <span class="core-name">JARVIS</span>
+        <span class="core-state" id="coreState">STANDING BY</span>
+      </button>
+    </section>
 
-      <section class="card core">
-        <canvas id="globe"></canvas>
-        <div class="core-label">
-          <div class="core-name">JARVIS</div>
-          <div class="core-sub">AI CORE</div>
-          <div class="core-ver" id="coreState">v1.0 · ONLINE</div>
-        </div>
-        <div class="captions" id="captions">
-          <div class="cap-user" id="capUser"></div>
-          <div class="cap-jarvis" id="capJarvis"></div>
-          <div class="cap-actions" id="capActions"></div>
-        </div>
-      </section>
-
-      <section class="card feed">
-        <div class="card-title">LIVE INTELLIGENCE FEED <span class="live">LIVE</span></div>
-        <ul class="feed-list" id="feed"></ul>
-        <button class="more" data-open="chat">View Conversation ›</button>
-      </section>
-
-      <!-- Row 2 -->
-      <section class="card skills">
-        <div class="card-title">ACTIVE SKILLS <button class="more inline" data-open="tools">View All ›</button></div>
-        <div class="skill-grid" id="skills"></div>
-      </section>
-
-      <section class="card timeline">
-        <div class="card-title">MISSION TIMELINE <span class="muted">Upcoming ▾</span></div>
-        <ul class="tl" id="timeline"></ul>
-        <button class="more" data-open="reminders">View Full Schedule ›</button>
-      </section>
-
-      <section class="card quick">
-        <div class="card-title">QUICK COMMANDS</div>
-        <div class="quick-list" id="quick"></div>
-      </section>
-
-      <!-- Row 3 -->
-      <section class="card monitor">
-        <div class="card-title">SYSTEM MONITOR <span class="muted" id="monitorHost">server</span></div>
-        <div class="gauges">
-          <div class="gauge" id="gCpu"></div>
-          <div class="gauge" id="gRam"></div>
-          <div class="gauge" id="gDisk"></div>
-        </div>
-      </section>
-
-      <section class="card memory">
-        <div class="card-title">MEMORY INSIGHTS</div>
-        <div class="mem-body">
-          <svg id="constellation" viewBox="0 0 220 120" aria-hidden="true"></svg>
-          <dl class="mem-stats">
-            <dt>Memories</dt><dd id="mFacts">0</dd>
-            <dt>Conversation Turns</dt><dd id="mTurns">0</dd>
-            <dt>Tool Calls</dt><dd id="mTools">0</dd>
-          </dl>
-        </div>
-        <button class="more" data-open="facts">View Memory Map ›</button>
-      </section>
-
-      <section class="card connections">
-        <div class="card-title">CONNECTIONS <span class="ok-count" id="connCount"></span></div>
-        <div class="conn-grid" id="connections"></div>
-      </section>
-    </main>
-
-    <footer class="bottombar">
-      <div class="chip"><i data-icon="pin"></i><div><small>Location</small><span id="bLocation">—</span></div></div>
-      <div class="chip"><i data-icon="sun"></i><div><small>Weather</small><span id="bWeather">—</span></div></div>
-      <div class="chip"><i data-icon="wifi"></i><div><small>Network</small><span id="bNetwork">—</span></div></div>
-      <div class="talk-wrap">
-        <div class="dots left"></div>
-        <button class="talk" id="talkBtn">
-          <span class="wave mini" id="talkWaveL"></span>
-          <span class="talk-text"><strong>TALK TO JARVIS</strong><small id="talkSub">Tap to speak</small></span>
-          <span class="wave mini" id="talkWaveR"></span>
-        </button>
-        <div class="dots right"></div>
+    <section class="transcript">
+      <div class="said">
+        <div class="said-user" id="capUser"></div>
+        <div class="said-jarvis" id="capJarvis">Standing by.</div>
+        <div class="said-actions" id="capActions"></div>
       </div>
-      <button class="brief-btn" id="briefBtn"><i data-icon="play"></i><span>Executive Briefing</span></button>
-    </footer>
-  </div>
+      <button class="talk" id="talkBtn"><i data-icon="mic" id="talkIcon"></i><span id="talkLabel">Talk</span></button>
+    </section>
+
+    <section class="timeline" aria-label="Mission timeline">
+      <div class="tl-head"><span>MISSION TIMELINE</span><span class="rule"></span><button class="link" data-open="reminders">Today</button></div>
+      <ol class="tl-track" id="timeline"></ol>
+    </section>
+  </main>
+
+  <!-- ============ RIGHT ============ -->
+  <aside class="right">
+    <section class="panel tasks">
+      <div class="panel-head"><span>ALL TASKS</span><em id="taskCount">—</em></div>
+      <ul class="task-list" id="tasks"></ul>
+      <form class="task-add" id="taskForm">
+        <input id="taskInput" autocomplete="off" placeholder="Add a task…" aria-label="New task">
+        <select id="taskPriority" aria-label="Priority">
+          <option value="high">High</option>
+          <option value="med" selected>Med</option>
+          <option value="low">Low</option>
+        </select>
+      </form>
+    </section>
+
+    <section class="panel monitor">
+      <div class="panel-head"><span>SYSTEM MONITOR</span><em id="monitorWhere">Live</em></div>
+      <div class="meters" id="meters"></div>
+    </section>
+  </aside>
 </div>
 
-<!-- ============ DRAWER (conversation + lists) ============ -->
+<!-- ============ DRAWER (conversation, lists, notifications) ============ -->
 <div class="scrim" id="scrim" hidden></div>
 <aside class="drawer" id="drawer" aria-hidden="true">
   <div class="drawer-head">
-    <div class="card-title" id="drawerTitle">CONVERSATION</div>
+    <span id="drawerTitle">CONVERSATIONS</span>
     <button class="icon-btn" id="drawerClose" aria-label="Close"><i data-icon="x"></i></button>
   </div>
-  <div class="drawer-body">
+  <div class="drawer-body" id="drawerBody">
     <div class="chat-log" id="chatLog"></div>
     <ul class="item-list" id="itemList" hidden></ul>
   </div>
   <form class="drawer-input" id="drawerForm">
-    <input id="drawerInput" autocomplete="off" placeholder="Message Jarvis…">
+    <input id="drawerInput" autocomplete="off" placeholder="Message Jarvis…" aria-label="Message Jarvis">
     <button type="button" class="icon-btn" id="drawerMic" aria-label="Speak"><i data-icon="mic"></i></button>
     <button type="submit" class="send">Send</button>
   </form>
 </aside>
 
-<div class="toasts" id="toasts"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
 
 <dialog id="login">
   <form method="dialog" id="loginForm">
-    <div class="card-title">ACCESS REQUIRED</div>
+    <div class="panel-head"><span>ACCESS REQUIRED</span></div>
     <p>Enter the <code>JARVIS_ACCESS_TOKEN</code> from your server's settings.</p>
     <input id="token" type="password" autocomplete="current-password" required>
     <button type="submit" class="send">Unlock</button>
