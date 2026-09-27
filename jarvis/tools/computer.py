@@ -3,6 +3,7 @@ on your own machine. Works on Windows, macOS and Linux."""
 
 from __future__ import annotations
 
+import io
 import os
 import platform
 import re
@@ -173,3 +174,41 @@ def system_info(ctx: Context, args: dict) -> str:
         f"Disk: {usage.free / gb:.1f} GB free of {usage.total / gb:.1f} GB\n"
         f"Local time: {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M %Z')}"
     )
+
+
+def capture_screen() -> tuple[bytes, str]:
+    """A screenshot of the main screen as (image bytes, mime type)."""
+    try:
+        import mss
+        import mss.tools
+    except ImportError as exc:
+        raise ToolError("Seeing the screen needs: pip install -r requirements-local.txt") from exc
+    with mss.mss() as sct:
+        shot = sct.grab(sct.monitors[1])
+    try:
+        from PIL import Image
+
+        img = Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
+        img.thumbnail((1600, 1600))  # plenty to read text, far cheaper to send
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=80)
+        return buf.getvalue(), "image/jpeg"
+    except ImportError:
+        return mss.tools.to_png(shot.rgb, shot.size), "image/png"
+
+
+@tool(
+    "look_at_screen",
+    "Take a screenshot of the user's screen and look at it, to answer questions about what "
+    "they're looking at (an error, a page, a document, a game…). Returns a description of "
+    "the screen focused on the question.",
+    {"question": {"type": "string", "description": "What to look for or answer."}},
+    ["question"],
+    local_only=True,
+)
+def look_at_screen(ctx: Context, args: dict) -> str:
+    if ctx.vision is None:
+        raise ToolError("Vision isn't available right now.")
+    data, mime = capture_screen()
+    ctx.notifier.publish("info", "Jarvis looked at your screen.")
+    return ctx.vision(data, mime, str(args.get("question") or "What's on the screen?"))

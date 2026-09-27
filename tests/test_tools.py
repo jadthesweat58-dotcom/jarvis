@@ -167,3 +167,20 @@ def test_computer_tools_stay_inside_root(ctx, tmp_path):
     assert REGISTRY["run_command"].requires_approval(ctx, {"command": "ls"})
     with pytest.raises(ToolError):
         run(ctx, "open_app", name="calc; rm -rf /")
+
+
+def test_look_at_screen_uses_vision(ctx, monkeypatch):
+    import jarvis.tools.computer as computer
+
+    events = []
+    ctx.notifier.subscribe(events.append)
+    monkeypatch.setattr(computer, "capture_screen", lambda: (b"jpegbytes", "image/jpeg"))
+    seen = []
+    ctx.vision = lambda data, mime, question: seen.append((data, mime, question)) or "A browser showing Gmail."
+    assert run(ctx, "look_at_screen", question="Any new emails?") == "A browser showing Gmail."
+    assert seen == [(b"jpegbytes", "image/jpeg", "Any new emails?")]
+    assert events[-1]["message"] == "Jarvis looked at your screen."
+    assert REGISTRY["look_at_screen"].local_only
+    ctx.vision = None
+    with pytest.raises(ToolError):
+        run(ctx, "look_at_screen", question="?")

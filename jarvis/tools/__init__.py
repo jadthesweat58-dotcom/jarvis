@@ -27,6 +27,8 @@ class Context:
     settings: "Settings"
     notifier: "Notifier"
     phone: "Phone"
+    # vision(image_bytes, mime_type, question) -> what the AI sees; set by the brain.
+    vision: Callable[[bytes, str, str], str] | None = None
 
 
 @dataclass

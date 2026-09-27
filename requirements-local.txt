@@ -1,4 +1,6 @@
 -r requirements.txt
-# Only needed on your own computer: clap-to-open listens to the microphone.
+# Only needed on your own computer: clap-to-open (microphone) and seeing your screen.
 numpy>=1.26
 sounddevice>=0.4
+mss>=9.0
+pillow>=10.0

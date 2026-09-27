@@ -104,6 +104,21 @@ Prefer the terminal? `python -m jarvis.cli` gives you a text chat.
   - "Give me my executive briefing."
   - (local mode) "Open Spotify" / "What's in my Downloads folder?"
 
+## Let Jarvis see your screen
+
+- **In the dashboard (cloud or local):** click the **eye** button next to the chat box and pick
+  the screen or window to share. While sharing, each message you send (typed or spoken) carries
+  a snapshot of your screen, so you can ask "what does this error mean?" or "summarize this
+  page". Click the eye again (or the browser's own **Stop sharing**) to stop. Works in desktop
+  Chrome, Edge and Safari.
+- **Jarvis on your own computer (`JARVIS_MODE=local`):** just ask "Jarvis, what's on my
+  screen?" and it takes a screenshot itself. Install the extras with
+  `pip install -r requirements-local.txt`; on a Mac, allow **Screen Recording** for Terminal in
+  System Settings > Privacy & Security the first time.
+
+Jarvis looks at each screenshot once and keeps a short written note of what it saw; the picture
+itself isn't saved.
+
 ## Clap twice to open Jarvis (your own computer)
 
 Like Tony Stark: clap twice and Jarvis opens in your browser and greets you out loud.

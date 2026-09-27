@@ -35,6 +35,12 @@ FALLBACK_MODELS = ("claude-opus-5", "claude-fable-5-1")
 # Models that take adaptive thinking and an effort level (older ones, e.g. Haiku 4.5, don't).
 ADAPTIVE_MODELS = MODERN_WEB_SEARCH
 
+VISION_PROMPT = """You are the eyes of JARVIS, a personal assistant. This is a screenshot of the
+user's screen. They said: "{question}"
+Describe what is on the screen that helps with that: which apps or windows are open, the key
+text (quote exact wording, numbers, error messages and names that matter), and anything else
+relevant. Plain text, under 200 words."""
+
 # approver(tool, args, summary) -> True to run the tool, False to decline.
 Approver = Callable[[Tool, dict, str], bool]
 
@@ -117,11 +123,37 @@ class Brain:
         self.remember_facts = remember_facts
         self._lock = threading.Lock()
         self.messages: list[dict] = ctx.db.load_conversation(conversation_id)
+        if ctx.vision is None:
+            ctx.vision = self.describe_image  # lets the look_at_screen tool use the AI's eyes
 
     # --- public API -------------------------------------------------------------
-    def chat(self, text: str) -> Reply:
+    def chat(self, text: str, image: tuple[bytes, str] | None = None) -> Reply:
+        """Answer a message. ``image`` is an optional (bytes, mime type) screenshot."""
         with self._lock:
+            if image:
+                # Look once and keep a short written note of what's on screen, instead of
+                # storing the picture in the conversation (smaller, cheaper, works for any model).
+                seen = self.describe_image(image[0], image[1], text)
+                text = f"{text}\n\n<my_screen_right_now>\n{seen}\n</my_screen_right_now>"
             return self._chat(text)
+
+    def describe_image(self, data: bytes, mime: str, question: str) -> str:
+        import base64
+
+        params: dict[str, Any] = {
+            "model": self.settings.model,
+            "max_tokens": 2000,
+            "messages": [{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": mime,
+                                             "data": base64.b64encode(data).decode()}},
+                {"type": "text", "text": VISION_PROMPT.format(question=question[:500])},
+            ]}],
+        }
+        if self.settings.model.startswith(ADAPTIVE_MODELS):
+            params["thinking"] = {"type": "adaptive"}
+            params["output_config"] = {"effort": "low"}
+        response = self._client().beta.messages.create(**params)
+        return self._text_of(response.content)
 
     def reset(self) -> None:
         with self._lock:

@@ -231,3 +231,30 @@ def test_tts_errors_are_explained(ctx):
     for status, words in ((401, "API key"), (404, "voice"), (402, "quota")):
         r = voice_client(ctx, FakeElevenLabs(status=status)).post("/api/tts", json={"text": "hello"})
         assert r.status_code == 502 and words in r.json()["detail"]
+
+
+PNG_1PX = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAwS2OUAAAAABJRU5ErkJggg==")
+
+
+def test_chat_with_screen_snapshot(ctx):
+    claude = FakeClaude(
+        response(text("VS Code is open with the error: NameError: name 'foo' is not defined")),
+        response(text("You're using foo before defining it.")),
+    )
+    client = make_client(ctx, claude)
+    r = client.post("/api/chat", json={"text": "what's this error?", "image": PNG_1PX})
+    assert r.json()["reply"] == "You're using foo before defining it."
+    look = claude.requests[0]["messages"][0]["content"]
+    assert look[0]["type"] == "image" and look[0]["source"]["media_type"] == "image/png"
+    assert "what's this error?" in look[1]["text"] and "tools" not in claude.requests[0]
+    turn = claude.requests[1]["messages"][-1]["content"][-1]["text"]
+    assert "<my_screen_right_now>" in turn and "NameError" in turn
+    # The picture itself is not kept in the saved conversation.
+    assert "base64" not in str(ctx.db.load_conversation("main"))
+
+
+def test_bad_screenshots_are_rejected(ctx):
+    client = make_client(ctx, FakeClaude())
+    assert client.post("/api/chat", json={"text": "hi", "image": "data:text/html;base64,PGI+"}).status_code == 400
+    big = "data:image/jpeg;base64," + "A" * (7 * 1024 * 1024)
+    assert client.post("/api/chat", json={"text": "hi", "image": big}).status_code == 413

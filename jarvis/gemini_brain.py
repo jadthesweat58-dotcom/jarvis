@@ -16,7 +16,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from jarvis.brain import MAX_HISTORY_MESSAGES, MAX_TOOL_ROUNDS, Brain, Reply
+from jarvis.brain import MAX_HISTORY_MESSAGES, MAX_TOOL_ROUNDS, VISION_PROMPT, Brain, Reply
 from jarvis.tools import Context, Tool
 
 log = logging.getLogger("jarvis.gemini")
@@ -66,6 +66,18 @@ class GeminiBrain(Brain):
         return self._client().models.generate_content(
             model=self.settings.model, contents=contents, config=self._config()
         )
+
+    def describe_image(self, data: bytes, mime: str, question: str) -> str:
+        config = types.GenerateContentConfig()
+        if self.settings.model.startswith("gemini-3"):
+            config.thinking_config = types.ThinkingConfig(thinking_level="LOW")
+        response = self._client().models.generate_content(
+            model=self.settings.model,
+            contents=[types.Part.from_bytes(data=data, mime_type=mime),
+                      VISION_PROMPT.format(question=question[:500])],
+            config=config,
+        )
+        return (response.text or "").strip() or "I couldn't make out the screen."
 
     # --- conversation ----------------------------------------------------------------
     def _user_turn(self, text: str) -> dict:

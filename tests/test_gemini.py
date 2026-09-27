@@ -126,3 +126,13 @@ def test_web_search_uses_google_search_grounding(gctx):
     assert search_request["config"].tools[0].google_search is not None
     result = gemini.requests[2]["contents"][-1]["parts"][0]["function_response"]["response"]["result"]
     assert "34°C" in result and "weather.com" in result
+
+
+def test_gemini_looks_at_the_screen(gctx):
+    gemini = FakeGemini(reply({"text": "A spreadsheet with Q3 sales of 1.2M."}), reply({"text": "Q3 sales were 1.2 million."}))
+    out = GeminiBrain(gctx, client=gemini).chat("what were Q3 sales?", image=(b"\x89PNGfake", "image/png"))
+    assert out.text == "Q3 sales were 1.2 million."
+    look = gemini.requests[0]["contents"]
+    assert look[0]["inline_data"]["mime_type"] == "image/png"
+    assert gemini.requests[0]["config"].thinking_config.thinking_level == types.ThinkingLevel.LOW
+    assert "1.2M" in gemini.requests[1]["contents"][-1]["parts"][-1]["text"]

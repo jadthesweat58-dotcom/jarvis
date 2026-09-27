@@ -41,6 +41,27 @@ HANGUP = "[HANGUP]"
 
 class ChatIn(BaseModel):
     text: str
+    image: str | None = None  # optional screenshot as a data: URL (screen sharing)
+
+
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+IMAGE_URL = re.compile(r"^data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$")
+
+
+def decode_image(data_url: str) -> tuple[bytes, str]:
+    import base64
+    import binascii
+
+    match = IMAGE_URL.match(data_url or "")
+    if not match:
+        raise HTTPException(400, "The screenshot must be a JPEG, PNG or WebP image.")
+    try:
+        data = base64.b64decode(match.group(2), validate=False)
+    except binascii.Error as exc:
+        raise HTTPException(400, "The screenshot couldn't be read.") from exc
+    if len(data) > MAX_IMAGE_BYTES:
+        raise HTTPException(413, "The screenshot is too large (5 MB max).")
+    return data, match.group(1)
 
 
 class ActionIn(BaseModel):
@@ -154,9 +175,9 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             raise HTTPException(403, "Invalid Twilio signature.")
         return form
 
-    def run_chat(brain: Brain, text: str) -> dict[str, Any]:
+    def run_chat(brain: Brain, text: str, image: tuple[bytes, str] | None = None) -> dict[str, Any]:
         try:
-            reply = brain.chat(text)
+            reply = brain.chat(text, image=image) if image else brain.chat(text)
         except Exception as exc:
             log.exception("Chat failed")
             raise HTTPException(500, f"Jarvis hit a problem: {exc}") from exc
@@ -185,7 +206,8 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     def chat(body: ChatIn) -> dict[str, Any]:
         if not body.text.strip():
             raise HTTPException(400, "Say something first.")
-        return run_chat(main_brain, body.text.strip())
+        image = decode_image(body.image) if body.image else None
+        return run_chat(main_brain, body.text.strip(), image)
 
     @app.post("/api/reset", dependencies=[Depends(require_user)])
     def reset() -> dict[str, bool]:

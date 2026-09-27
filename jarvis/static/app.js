@@ -43,6 +43,7 @@
     alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',
     book: '<path d="M4 19V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zm0 0a2 2 0 0 0 2 2h13"/><path d="M9 7h6"/>',
     stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+    eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
   };
   const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.grid}</svg>`;
@@ -156,14 +157,57 @@
   }
 
   let busy = false;
+  // ------------------------------------------------------------------ screen sharing
+  // While sharing, every message carries a snapshot of the screen so Jarvis can see it.
+  let screenStream = null;
+  const canShareScreen = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !window.JARVIS_NO_SCREEN;
+  if (!canShareScreen) $("screenBtn").hidden = true;
+  async function toggleScreen() {
+    if (screenStream) return stopScreen();
+    try {
+      screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 2 }, audio: false });
+    } catch (e) {
+      if (e.name !== "NotAllowedError") toast(`Couldn't share the screen: ${e.message}`, true);
+      return;
+    }
+    const video = $("screenVideo");
+    video.srcObject = screenStream;
+    video.play().catch(() => {});
+    screenStream.getVideoTracks()[0].addEventListener("ended", stopScreen);  // browser's own Stop button
+    $("screenBtn").classList.add("on");
+    $("screenBtn").setAttribute("aria-pressed", "true");
+    $("screenChip").hidden = false;
+    toast("Jarvis will see your screen each time you send a message. Click the eye again to stop.");
+  }
+  function stopScreen() {
+    if (screenStream) screenStream.getTracks().forEach((t) => t.stop());
+    screenStream = null;
+    $("screenVideo").srcObject = null;
+    $("screenBtn").classList.remove("on");
+    $("screenBtn").setAttribute("aria-pressed", "false");
+    $("screenChip").hidden = true;
+  }
+  function screenSnapshot() {
+    const video = $("screenVideo");
+    if (!screenStream || !video.videoWidth) return null;
+    const scale = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.8);
+  }
+  $("screenBtn").onclick = toggleScreen;
+
   async function send(text) {
     text = (text || "").trim();
     if (!text) return;
-    addMsg("user", text);
+    const image = screenSnapshot();
+    addMsg("user", image ? `${text}  🖥` : text);
     busy = true;
-    setMode("thinking", "Jarvis is thinking…");
+    setMode("thinking", image ? "Jarvis is looking at your screen…" : "Jarvis is thinking…");
     try {
-      await handleReply(await api("/api/chat", { text }), text);
+      await handleReply(await api("/api/chat", image ? { text, image } : { text }), text);
     } catch (e) {
       if (e.message !== "locked") { addMsg("system", e.message); toast(e.message, true); live(""); }
     } finally {

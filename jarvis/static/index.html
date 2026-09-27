@@ -85,12 +85,13 @@
     </section>
 
     <section class="chatbox" aria-label="Chat with Jarvis">
-      <div class="chat-head"><span>CONVERSATION</span><span class="rule"></span><button class="link" data-open="chat">Full history</button></div>
+      <div class="chat-head"><span>CONVERSATION</span><span class="screen-chip" id="screenChip" hidden><i class="dot"></i>Jarvis can see your screen</span><span class="rule"></span><button class="link" data-open="chat">Full history</button></div>
       <div class="box-log" id="boxLog" aria-live="polite"></div>
       <div class="said-actions" id="capActions"></div>
       <div class="box-live" id="capUser"></div>
       <form class="box-input" id="boxForm">
         <input id="boxInput" autocomplete="off" placeholder="Message Jarvis…" aria-label="Message Jarvis">
+        <button type="button" class="icon-btn screen-btn" id="screenBtn" title="Share your screen with Jarvis" aria-label="Share your screen with Jarvis" aria-pressed="false"><i data-icon="eye"></i></button>
         <button type="submit" class="send">Send</button>
         <button type="button" class="talk" id="talkBtn"><i data-icon="mic" id="talkIcon"></i><span id="talkLabel">Talk</span></button>
       </form>
@@ -143,6 +144,7 @@
 </aside>
 
 <div class="toasts" id="toasts" aria-live="polite"></div>
+<video id="screenVideo" muted playsinline hidden></video>
 
 <dialog id="login">
   <form method="dialog" id="loginForm">
