@@ -15,9 +15,10 @@ def find_contact(ctx: Context, who: str) -> tuple[str, str]:
             return who, normalize_number(who)
         except PhoneError as exc:
             raise ToolError(str(exc)) from exc
-    row = ctx.db.one("SELECT * FROM contacts WHERE name = ? COLLATE NOCASE", (who,))
+    row = ctx.db.one("SELECT * FROM contacts WHERE lower(name) = lower(?)", (who,))
     if not row:
-        row = ctx.db.one("SELECT * FROM contacts WHERE name LIKE ? ORDER BY length(name)", (f"%{who}%",))
+        row = ctx.db.one("SELECT * FROM contacts WHERE lower(name) LIKE lower(?) ORDER BY length(name)",
+                         (f"%{who}%",))
     if not row:
         raise ToolError(f"No contact called '{who}'. Ask the user for their number and save it with add_contact.")
     return row["name"], row["phone"]
@@ -38,11 +39,11 @@ def add_contact(ctx: Context, args: dict) -> str:
         phone = normalize_number(args["phone"])
     except PhoneError as exc:
         raise ToolError(str(exc)) from exc
-    ctx.db.execute(
-        "INSERT INTO contacts (name, phone, relationship, created_at) VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(name) DO UPDATE SET phone = excluded.phone, relationship = excluded.relationship",
-        (args["name"].strip(), phone, args.get("relationship") or "", utcnow()),
-    )
+    name, relationship = args["name"].strip(), args.get("relationship") or ""
+    if not ctx.db.execute("UPDATE contacts SET phone = ?, relationship = ? WHERE lower(name) = lower(?)",
+                          (phone, relationship, name)):
+        ctx.db.execute("INSERT INTO contacts (name, phone, relationship, created_at) VALUES (?, ?, ?, ?)",
+                       (name, phone, relationship, utcnow()))
     return f"Saved contact {args['name']} ({phone})."
 
 
@@ -58,7 +59,7 @@ def list_contacts(ctx: Context, args: dict) -> str:
 
 @tool("delete_contact", "Delete a saved contact.", {"name": {"type": "string"}}, ["name"])
 def delete_contact(ctx: Context, args: dict) -> str:
-    if not ctx.db.execute("DELETE FROM contacts WHERE name = ? COLLATE NOCASE", (args["name"],)):
+    if not ctx.db.execute("DELETE FROM contacts WHERE lower(name) = lower(?)", (args["name"],)):
         raise ToolError(f"No contact called '{args['name']}'.")
     return f"Deleted contact {args['name']}."
 

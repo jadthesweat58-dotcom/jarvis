@@ -29,7 +29,8 @@ def search_notes(ctx: Context, args: dict) -> str:
     query = (args.get("query") or "").strip()
     if query:
         rows = ctx.db.query(
-            "SELECT * FROM notes WHERE title LIKE ? OR body LIKE ? ORDER BY id DESC LIMIT 20",
+            "SELECT * FROM notes WHERE lower(title) LIKE lower(?) OR lower(body) LIKE lower(?) "
+            "ORDER BY id DESC LIMIT 20",
             (f"%{query}%", f"%{query}%"),
         )
     else:

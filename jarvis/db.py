@@ -207,8 +207,74 @@ class TursoDatabase(Database):
         return [dict(zip(names, (self._decode(v) for v in row))) for row in result.get("rows", [])]
 
 
+class PostgresDatabase(Database):
+    """The same database kept in Postgres, e.g. a free Supabase project, so a free
+    cloud host that wipes its disk doesn't make Jarvis forget.
+
+    Jarvis's queries are written in SQL that works on both SQLite and Postgres;
+    this class only translates the "?" placeholders and returns new row ids.
+    """
+
+    poll_interval = 5.0
+
+    def __init__(self, url: str):
+        self.path = url
+        self._lock = threading.RLock()
+        self._conn = None
+        schema = SCHEMA.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "BIGSERIAL PRIMARY KEY")
+        schema = schema.replace(" COLLATE NOCASE", "")
+        for statement in schema.split(";"):
+            if statement.strip():
+                self._run(statement, (), fetch=False)
+
+    def _connect(self):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        # prepare_threshold=None: Supabase's connection pooler can't keep prepared statements.
+        return psycopg.connect(self.path, autocommit=True, prepare_threshold=None,
+                               row_factory=dict_row, connect_timeout=15)
+
+    @staticmethod
+    def _translate(sql: str) -> str:
+        return sql.replace("%", "%%").replace("?", "%s")
+
+    def _run(self, sql: str, params: tuple | list, fetch: bool):
+        import psycopg
+
+        with self._lock:
+            for attempt in (1, 2):
+                try:
+                    if self._conn is None or self._conn.closed:
+                        self._conn = self._connect()
+                    with self._conn.cursor() as cur:
+                        cur.execute(self._translate(sql), tuple(params))
+                        rows = cur.fetchall() if fetch and cur.description else []
+                        return rows, cur.rowcount
+                except psycopg.OperationalError:
+                    # The pooler drops idle connections; reconnect once and retry.
+                    self._conn = None
+                    if attempt == 2:
+                        raise
+
+    def execute(self, sql: str, params: tuple | list = ()) -> int:
+        if sql.lstrip().upper().startswith("INSERT"):
+            rows, _ = self._run(sql.rstrip() + " RETURNING id", params, fetch=True)
+            new_id = rows[0]["id"] if rows else 0
+            return new_id if isinstance(new_id, int) else 0
+        _, count = self._run(sql, params, fetch=False)
+        return max(count, 0)
+
+    def query(self, sql: str, params: tuple | list = ()) -> list[dict[str, Any]]:
+        rows, _ = self._run(sql, params, fetch=True)
+        return [dict(r) for r in rows]
+
+
 def open_database(settings: Any) -> Database:
-    """Turso when TURSO_DATABASE_URL is set, otherwise a local SQLite file."""
+    """Postgres (e.g. Supabase) when DATABASE_URL is set, Turso when TURSO_DATABASE_URL
+    is set, otherwise a local SQLite file."""
+    if settings.database_url:
+        return PostgresDatabase(settings.database_url)
     if settings.turso_database_url:
         return TursoDatabase(settings.turso_database_url, settings.turso_auth_token)
     return Database(settings.db_path)

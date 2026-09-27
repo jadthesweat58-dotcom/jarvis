@@ -29,20 +29,26 @@ Anything risky (calling or texting someone else, running a command, writing a fi
 ## 2. Put Jarvis in the cloud for free (recommended first)
 
 Jarvis ships as a Docker app, so it runs on any host. This setup costs nothing: **Render**'s free
-plan runs Jarvis, and a free **Turso** database holds its memory (Render's free plan wipes its disk
-on every restart, so the memory lives online instead).
+plan runs Jarvis, and a free **Supabase** database holds its memory (Render's free plan wipes its
+disk on every restart, so the memory lives online instead).
 
-**A. Create the memory database (Turso, free)**
-1. Sign up at https://turso.tech (you can use your GitHub account).
-2. Create a database, e.g. named `jarvis`.
-3. Copy its **URL** (starts with `libsql://`) and create an **auth token** for it. Keep both.
+**A. Create the memory database (Supabase, free)**
+1. Sign up at https://supabase.com and create a **new project** (any name, e.g. `jarvis`).
+   Choose a **database password** using only letters and numbers (symbols like `@` or `#` break
+   the connection string) and save it somewhere safe. Pick the region closest to you.
+2. When the project is ready, click **Connect** (top of the page) and choose
+   **Session pooler**. Copy the connection string; it looks like
+   `postgresql://postgres.abcdefgh:[YOUR-PASSWORD]@aws-0-….pooler.supabase.com:5432/postgres`.
+   (Use the *pooler* one: Render can't reach Supabase's "direct connection".)
+3. Replace `[YOUR-PASSWORD]` with your database password. That full line is your `DATABASE_URL`.
+   Jarvis creates its tables automatically on first start.
 
 **B. Deploy Jarvis (Render, free)**
 1. Go to https://dashboard.render.com → **New → Blueprint** → pick this repo. Render reads
    `render.yaml` and sets everything up.
 2. Fill in the settings it asks for:
    - `GEMINI_API_KEY`: your Gemini key
-   - `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`: from step A
+   - `DATABASE_URL`: the Supabase connection string from step A
    - `MY_NAME`: what Jarvis calls you
    - `TIMEZONE`: e.g. `Asia/Dubai`, `Europe/London`, `America/New_York`
    - `HOME_CITY`: e.g. `Dubai` (for weather)
@@ -56,12 +62,13 @@ Render's free plan puts Jarvis to sleep after about 15 minutes without visitors,
 Jarvis can't fire reminders. A free monitor such as https://uptimerobot.com can visit
 `https://YOUR-JARVIS-URL/healthz` every 5 minutes to keep it awake.
 
-Want no sleeping and no Turso? Change `plan: free` to `plan: starter` in `render.yaml` (paid) and
-add a disk mounted at `/data` instead.
+Want no sleeping and no Supabase? Change `plan: free` to `plan: starter` in `render.yaml` (paid)
+and add a disk mounted at `/data` instead. (Turso also works as the online database: set
+`TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` instead of `DATABASE_URL`.)
 
 **Other hosts** (Railway, Fly.io, a VPS…): deploy the `Dockerfile`, set the same environment
 variables (see `.env.example`), set a strong `JARVIS_ACCESS_TOKEN` and `PUBLIC_BASE_URL`, and either
-set the Turso values or mount a volume at `/data`.
+set `DATABASE_URL` or mount a volume at `/data`.
 
 ### Let people phone Jarvis (optional)
 In the Twilio console → Phone Numbers → your number → **Voice → "A call comes in"** → Webhook →
@@ -77,8 +84,8 @@ Jarvis; anyone else can leave a message, which appears in your feed and notes.
    - **Mac / Linux**: run `./scripts/start.sh` in a terminal
 4. The first run creates a `.env` file. Open it, paste your `GEMINI_API_KEY`, and set
    `JARVIS_MODE=local` if you want Jarvis to control your computer. To share memories with your
-   cloud Jarvis, also paste the same `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` (if both run at
-   once, reminders may pop up on both). Run the script again.
+   cloud Jarvis, also paste the same `DATABASE_URL` (if both run at once, reminders may pop up
+   on both). Run the script again.
 5. Your browser opens `http://localhost:8000`. (On your own computer no access token is needed.)
 
 Prefer the terminal? `python -m jarvis.cli` gives you a text chat.
@@ -133,7 +140,7 @@ jarvis/
   tools/          memory, notes, web (weather), reminders, calls, computer
   phone.py        Twilio calls & texts
   scheduler.py    fires reminders
-  db.py           SQLite storage (data/jarvis.db)
+  db.py           storage: SQLite file (data/jarvis.db), or Supabase/Postgres or Turso online
   static/         the command-center web app (HTML/CSS/JS, no build step)
 tests/            pytest suite (uses fake Gemini, Claude & Twilio; no keys needed)
 ```

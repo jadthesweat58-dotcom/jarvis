@@ -4,14 +4,12 @@ services:
   - type: web
     name: jarvis
     runtime: docker
-    plan: free               # free plans have no lasting disk, so memory lives in Turso (below)
+    plan: free               # free plans have no lasting disk, so memory lives in Supabase (below)
     healthCheckPath: /healthz
     envVars:
-      # Jarvis's memory: a free Turso database (https://turso.tech). Without these,
-      # Jarvis forgets everything whenever Render restarts it.
-      - key: TURSO_DATABASE_URL
-        sync: false
-      - key: TURSO_AUTH_TOKEN
+      # Jarvis's memory: a free Supabase database's "Session pooler" connection string.
+      # Without it, Jarvis forgets everything whenever Render restarts it.
+      - key: DATABASE_URL
         sync: false
       - key: JARVIS_PROVIDER
         value: gemini

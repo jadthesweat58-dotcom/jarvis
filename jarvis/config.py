@@ -34,7 +34,10 @@ class Settings:
     model: str = field(default_factory=lambda: _env("JARVIS_MODEL"))
     effort: str = field(default_factory=lambda: _env("JARVIS_EFFORT", "medium"))
     access_token: str = field(default_factory=lambda: _env("JARVIS_ACCESS_TOKEN"))
-    # Optional online database (https://turso.tech) so memory survives on free hosting.
+    # Optional online database so memory survives on free hosting: a Postgres
+    # connection string (e.g. Supabase), or a Turso database (https://turso.tech).
+    database_url: str = field(default_factory=lambda: _env("DATABASE_URL"))
+
     turso_database_url: str = field(default_factory=lambda: _env("TURSO_DATABASE_URL"))
     turso_auth_token: str = field(default_factory=lambda: _env("TURSO_AUTH_TOKEN"))
     data_dir: Path = field(default_factory=lambda: Path(_env("JARVIS_DATA_DIR", "data")))

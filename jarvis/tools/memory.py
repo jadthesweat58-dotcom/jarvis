@@ -40,7 +40,7 @@ def recall_facts(ctx: Context, args: dict) -> str:
     query = (args.get("query") or "").strip()
     if query:
         rows = ctx.db.query(
-            "SELECT * FROM facts WHERE fact LIKE ? OR category LIKE ? ORDER BY id",
+            "SELECT * FROM facts WHERE lower(fact) LIKE lower(?) OR lower(category) LIKE lower(?) ORDER BY id",
             (f"%{query}%", f"%{query}%"),
         )
     else:

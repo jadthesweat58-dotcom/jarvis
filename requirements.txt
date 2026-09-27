@@ -8,3 +8,4 @@ python-dotenv>=1.0
 tzdata>=2024.1
 python-multipart>=0.0.9
 psutil>=5.9
+psycopg[binary]>=3.2
