@@ -381,6 +381,7 @@
     refresh();
   };
   $("lockBtn").onclick = () => { store.del("jarvis-token"); token = ""; location.reload(); };
+  if (window.JARVIS_NO_EXPORT) $("exportBtn").hidden = true;
   $("exportBtn").onclick = async () => {
     try {
       const res = await fetch("/api/export", { headers: token ? { Authorization: `Bearer ${token}` } : {} });

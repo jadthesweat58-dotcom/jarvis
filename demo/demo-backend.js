@@ -430,6 +430,7 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
   };
 
   // Microphones are blocked inside the claude.ai page frame; say so plainly.
+  window.JARVIS_NO_EXPORT = true;  // the preview can't hand you a file
   window.JARVIS_NO_PUSH = true;    // installing and push notifications need the real server
   window.JARVIS_NO_SCREEN = true;  // screen capture is blocked inside the claude.ai page frame
   window.JARVIS_NO_VOICE_MSG = "Voice input isn't available in this preview. Type instead; the full Jarvis listens in Chrome, Edge or Safari.";
