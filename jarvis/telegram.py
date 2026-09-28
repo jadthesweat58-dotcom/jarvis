@@ -30,9 +30,15 @@ log = logging.getLogger("jarvis.telegram")
 
 API = "https://api.telegram.org"
 LINK_CODE_SECONDS = 15 * 60
+MAX_WRONG_CODES = 5          # then the code stops working and a new one must be made
 MAX_MESSAGE = 4000
 FORWARD_KINDS = {"reminder", "briefing", "call", "error"}
 ICONS = {"reminder": "⏰", "briefing": "🌅", "call": "📞", "error": "⚠️"}
+
+
+def _same(a: str, b: str) -> bool:
+    """Constant-time comparison that also copes with non-ASCII input."""
+    return hmac.compare_digest(a.encode(), b.encode())
 
 
 class TelegramBot:
@@ -41,6 +47,7 @@ class TelegramBot:
         self.make_brain = make_brain
         self._http = client or httpx.Client(timeout=40)
         self._brain: Any = None
+        self._brain_lock = threading.Lock()
         self._seen: deque[int] = deque(maxlen=200)  # update ids already handled (Telegram retries)
         self._seen_lock = threading.Lock()
         self._stop = threading.Event()
@@ -77,16 +84,21 @@ class TelegramBot:
         return int(value) if value.lstrip("-").isdigit() else None
 
     def new_link_code(self) -> str:
-        code = f"{secrets.randbelow(1_000_000):06d}"
-        self.ctx.db.set_kv("telegram_link_code", f"{code}:{int(time.time()) + LINK_CODE_SECONDS}")
+        # Long and random (it travels inside the t.me link), so it can't be guessed.
+        code = secrets.token_urlsafe(18)
+        self.ctx.db.set_kv("telegram_link_code", f"{code}:{int(time.time()) + LINK_CODE_SECONDS}:0")
         return code
 
     def _claim_code(self, supplied: str) -> bool:
         stored = self.ctx.db.get_kv("telegram_link_code")
-        code, _, expires = stored.partition(":")
+        code, _, rest = stored.partition(":")
+        expires, _, wrong = rest.partition(":")
         if not code or not supplied or int(expires or 0) < time.time():
             return False
-        if not hmac.compare_digest(code, supplied.strip()):
+        if not _same(code, supplied.strip()):
+            tries = int(wrong or 0) + 1
+            # Too many wrong guesses: throw the code away.
+            self.ctx.db.set_kv("telegram_link_code", "" if tries >= MAX_WRONG_CODES else f"{code}:{expires}:{tries}")
             return False
         self.ctx.db.set_kv("telegram_link_code", "")  # one use only
         return True
@@ -104,7 +116,7 @@ class TelegramBot:
 
     def check_secret(self, supplied: str) -> bool:
         stored = self.ctx.db.get_kv("telegram_secret")
-        return bool(stored and supplied) and hmac.compare_digest(stored, supplied)
+        return bool(stored and supplied) and _same(stored, supplied)
 
     def start(self) -> None:
         """Connect to Telegram: a webhook on a public server, polling otherwise."""
@@ -161,9 +173,10 @@ class TelegramBot:
             log.exception("Telegram update failed")
 
     def brain(self) -> Any:
-        if self._brain is None:
-            self._brain = self.make_brain(conversation_id="telegram")
-        return self._brain
+        with self._brain_lock:  # two messages at once must share one conversation
+            if self._brain is None:
+                self._brain = self.make_brain(conversation_id="telegram")
+            return self._brain
 
     def _on_message(self, msg: dict) -> None:
         chat_id = (msg.get("chat") or {}).get("id")
@@ -185,12 +198,16 @@ class TelegramBot:
             return
         if chat_id != owner:
             return  # strangers get nothing
-        attachment = self._attachment(msg)
-        if not text and not attachment:
-            return
         if text == "/new":
             self.brain().reset()
             self.send(chat_id, "Fresh conversation started.")
+            return
+        try:
+            attachment = self._attachment(msg)
+        except Exception as exc:
+            self.send(chat_id, f"Sorry, I couldn't get that file: {exc}")
+            return
+        if not text and not attachment:
             return
         self.call("sendChatAction", chat_id=chat_id, action="typing")
         try:
@@ -233,7 +250,8 @@ class TelegramBot:
         if int(info.get("file_size") or 0) > 10 * 1024 * 1024:
             raise ToolError("That file is too large (10 MB max).")
         resp = self._http.get(f"{API}/file/bot{self.ctx.settings.telegram_bot_token}/{info['file_path']}")
-        resp.raise_for_status()
+        if resp.status_code != 200:  # (not raise_for_status: its message would carry the bot token)
+            raise RuntimeError(f"Telegram answered with error {resp.status_code}.")
         return resp.content
 
     def _on_button(self, query: dict) -> None:

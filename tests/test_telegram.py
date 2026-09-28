@@ -63,7 +63,7 @@ def msg(chat, text, update_id=None, **extra):
 def test_linking_needs_the_code(ctx, api):
     bot, _ = make_bot(ctx, api)
     code = bot.new_link_code()
-    bot.handle(msg(STRANGER, "/start 000000" if code != "000000" else "/start 111111", 1))
+    bot.handle(msg(STRANGER, "/start wrong-guess", 1))
     assert bot.owner_chat is None and "private assistant" in api.sent()[-1]
     bot.handle(msg(OWNER, f"/start {code}", 2))
     assert bot.owner_chat == OWNER and api.sent()[-1].startswith("Linked.")
@@ -72,10 +72,22 @@ def test_linking_needs_the_code(ctx, api):
     assert bot.owner_chat == OWNER
 
 
+def test_guessing_burns_the_code(ctx, api):
+    bot, _ = make_bot(ctx, api)
+    code = bot.new_link_code()
+    assert len(code) >= 20
+    for i in range(5):
+        bot.handle(msg(STRANGER, f"/start guess{i}", 10 + i))
+    bot.handle(msg(OWNER, f"/start {code}", 20))  # too late: the code was thrown away
+    assert bot.owner_chat is None
+    bot.handle(msg(STRANGER, "/start é", 21))  # non-ASCII doesn't crash anything
+    assert bot.owner_chat is None
+
+
 def test_expired_code_is_refused(ctx, api):
     bot, _ = make_bot(ctx, api)
     code = bot.new_link_code()
-    ctx.db.set_kv("telegram_link_code", f"{code}:{int(time.time()) - 1}")
+    ctx.db.set_kv("telegram_link_code", f"{code}:{int(time.time()) - 1}:0")
     bot.handle(msg(OWNER, f"/start {code}", 1))
     assert bot.owner_chat is None
 
@@ -158,6 +170,8 @@ def test_webhook_needs_the_secret(ctx, monkeypatch):
     assert client.post("/telegram/webhook", json={"update_id": 1}).status_code == 404
     assert client.post("/telegram/webhook", json={"update_id": 1},
                        headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"}).status_code == 404
+    assert client.post("/telegram/webhook", json={"update_id": 1},
+                       headers={"X-Telegram-Bot-Api-Secret-Token": "sécret".encode()}).status_code == 404
     ok = client.post("/telegram/webhook", json={"update_id": 1},
                      headers={"X-Telegram-Bot-Api-Secret-Token": "right-secret"})
     assert ok.status_code == 200 and handled == [{"update_id": 1}]
@@ -171,5 +185,5 @@ def test_link_endpoint(ctx, monkeypatch):
     ctx.settings.telegram_bot_token = "123:ABC"
     monkeypatch.setattr(TelegramBot, "username", lambda self: "jad_jarvis_bot")
     out = client.post("/api/telegram/link").json()
-    assert out["link"] == f"https://t.me/jad_jarvis_bot?start={out['code']}" and len(out["code"]) == 6
+    assert out["link"] == f"https://t.me/jad_jarvis_bot?start={out['code']}" and len(out["code"]) >= 20
     assert client.get("/api/status").json()["telegram"]["enabled"] is True

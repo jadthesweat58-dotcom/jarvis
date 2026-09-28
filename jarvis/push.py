@@ -41,8 +41,9 @@ def vapid_keys(ctx: Context) -> tuple[str, str]:
             key = ec.generate_private_key(ec.SECP256R1())
             private_pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                                             serialization.NoEncryption()).decode()
-            ctx.db.set_kv("vapid_private_key", private_pem)
-            # Another server instance may have stored its key first: use whichever won.
+            # Another server sharing the database may have stored a key first: keep that one.
+            ctx.db.execute("INSERT INTO kv (key, value) VALUES ('vapid_private_key', ?) ON CONFLICT(key) DO NOTHING",
+                           (private_pem,))
             private_pem = ctx.db.get_kv("vapid_private_key") or private_pem
     from cryptography.hazmat.primitives import serialization
 
@@ -68,9 +69,8 @@ def save_subscription(ctx: Context, sub: dict[str, Any]) -> None:
     except UnsafeURL as exc:
         raise ValueError(str(exc)) from exc
     data = json.dumps({"endpoint": endpoint, "keys": {"p256dh": keys["p256dh"], "auth": keys["auth"]}})
-    if not ctx.db.execute("UPDATE push_subscriptions SET data = ? WHERE endpoint = ?", (data, endpoint)):
-        ctx.db.execute("INSERT INTO push_subscriptions (endpoint, data, created_at) VALUES (?, ?, ?)",
-                       (endpoint, data, utcnow()))
+    ctx.db.execute("INSERT INTO push_subscriptions (endpoint, data, created_at) VALUES (?, ?, ?) "
+                   "ON CONFLICT(endpoint) DO UPDATE SET data = excluded.data", (endpoint, data, utcnow()))
 
 
 def remove_subscription(ctx: Context, endpoint: str) -> bool:

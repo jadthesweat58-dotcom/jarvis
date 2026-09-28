@@ -16,17 +16,20 @@ REPEAT_WORDS = {"daily": "every day", "weekdays": "every weekday", "weekly": "ev
 
 
 def repeat_rule(rule: str | None, first: datetime, tz: ZoneInfo) -> str | None:
-    """The stored rule. Monthly remembers its day, so the 31st stays the 31st
-    (or the month's last day) instead of drifting after a short month."""
+    """The stored rule, e.g. "weekdays@08:00" or "monthly:31@09:00". It remembers the
+    clock time (so a daylight-saving jump can't shift it for good) and, for monthly,
+    the day, so the 31st stays the 31st (or the month's last day) after a short month."""
     if not rule:
         return None
     if rule not in REPEATS:
         raise ToolError(f"repeat must be one of {', '.join(REPEATS)}.")
-    return f"monthly:{first.astimezone(tz).day}" if rule == "monthly" else rule
+    local = first.astimezone(tz)
+    base = f"monthly:{local.day}" if rule == "monthly" else rule
+    return f"{base}@{local:%H:%M}"
 
 
 def describe_repeat(rule: str | None) -> str:
-    return REPEAT_WORDS.get((rule or "").split(":")[0], "")
+    return REPEAT_WORDS.get((rule or "").split("@")[0].split(":")[0], "")
 
 
 def next_due(due_utc: str, rule: str, tz: ZoneInfo, now: datetime | None = None) -> str:
@@ -35,7 +38,11 @@ def next_due(due_utc: str, rule: str, tz: ZoneInfo, now: datetime | None = None)
     while the server was asleep are skipped, not fired in a burst."""
     now = now or datetime.now(timezone.utc)
     local = datetime.fromisoformat(due_utc).astimezone(tz).replace(tzinfo=None)  # wall-clock time
-    kind, _, anchor = rule.partition(":")
+    base, _, at = rule.partition("@")
+    kind, _, anchor = base.partition(":")
+    if at:
+        hour, minute = (int(x) for x in at.split(":"))
+        local = local.replace(hour=hour, minute=minute, second=0)
     for _ in range(5000):
         if kind == "daily":
             local += timedelta(days=1)

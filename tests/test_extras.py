@@ -35,6 +35,7 @@ def test_calculator(expr, expected):
 
 
 @pytest.mark.parametrize("expr", ["__import__('os')", "(1).real", "open('x')", "9**9**9", "a + 1",
+                                  "(((10**1000)**50)**50)**50", "((10**3000)*(10**3000))*(10**3000)*(10**9000)",
                                   "[1, 2]", "lambda: 1", "factorial(100000)", "1/0", "x" * 400])
 def test_calculator_refuses_anything_but_maths(expr):
     with pytest.raises(ToolError):
@@ -125,7 +126,7 @@ def test_public_address_allowed(dns):
 
 def test_redirect_to_private_address_is_blocked(dns):
     def handler(request):
-        if request.url.host == "example.com":
+        if request.headers["host"] == "example.com":
             return httpx.Response(302, headers={"location": "http://internal.example/secret"})
         return httpx.Response(200, text="secret stuff")
 
@@ -143,6 +144,19 @@ def test_fetch_follows_safe_redirects_and_caps_size(dns):
     client = httpx.Client(transport=httpx.MockTransport(handler))
     final, ctype, body = safeurl.fetch("https://example.com/old", client=client, max_bytes=1000)
     assert final == "https://example.com/new" and ctype == "text/plain" and len(body) == 1000
+
+
+def test_fetch_connects_to_the_checked_ip(dns):
+    """DNS rebinding: the request goes to the IP that passed the check, not a fresh lookup."""
+    seen = []
+
+    def handler(request):
+        seen.append((str(request.url), request.headers["host"], request.extensions.get("sni_hostname")))
+        return httpx.Response(200, text="ok")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    safeurl.fetch("https://example.com:8443/a?b=1", client=client)
+    assert seen == [("https://93.184.216.34:8443/a?b=1", "example.com:8443", "example.com")]
 
 
 def test_read_webpage(ctx, monkeypatch):

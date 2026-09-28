@@ -74,3 +74,23 @@ def test_set_and_list_repeating_reminder(ctx):
     rid = ctx.db.one("SELECT id FROM reminders WHERE message = 'Standup'")["id"]
     REGISTRY["cancel_reminder"].handler(ctx, {"id": rid})
     assert ctx.db.one("SELECT status FROM reminders WHERE id = ?", (rid,))["status"] == "cancelled"
+
+
+def test_clock_time_survives_a_spring_forward_gap():
+    """02:30 doesn't exist on the spring-forward day; it must be 02:30 again afterwards."""
+    tz = ZoneInfo("America/New_York")
+    first = datetime(2027, 3, 13, 2, 30, tzinfo=tz)
+    rule = "daily@02:30"
+    due = iso(first)
+    hours = []
+    for _ in range(3):
+        due = next_due(due, rule, tz, datetime.fromisoformat(due) + timedelta(seconds=1))
+        hours.append(datetime.fromisoformat(due).astimezone(tz).strftime("%d %H:%M"))
+    assert hours[1:] == ["15 02:30", "16 02:30"]
+
+
+def test_rule_remembers_time_and_day(ctx):
+    load_all()
+    ctx.settings.timezone = "Asia/Dubai"
+    REGISTRY["set_reminder"].handler(ctx, {"message": "Rent", "at": "2030-01-31T09:15", "repeat": "monthly"})
+    assert ctx.db.one("SELECT repeat_rule FROM reminders")["repeat_rule"] == "monthly:31@09:15"

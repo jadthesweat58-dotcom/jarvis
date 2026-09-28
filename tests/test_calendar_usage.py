@@ -47,16 +47,22 @@ class FakeHTTP:
 
     def get(self, url, timeout=None, follow_redirects=None):
         self.urls.append(url)
-        return SimpleNamespace(content=self.body.encode(), raise_for_status=lambda: None)
+        return SimpleNamespace(status_code=200, content=self.body.encode())
+
+
+def clear_caches():
+    agenda._cache.clear()
+    agenda._failed.clear()
+    agenda._today.clear()
 
 
 @pytest.fixture
 def cal(ctx):
-    agenda._cache.clear()
+    clear_caches()
     ctx.settings.timezone = "Asia/Dubai"
     ctx.settings.calendar_ics_url = "webcal://calendar.example/private-abc/basic.ics"
     yield ctx
-    agenda._cache.clear()
+    clear_caches()
 
 
 def test_expands_repeating_and_all_day_events(cal):
@@ -73,6 +79,31 @@ def test_expands_repeating_and_all_day_events(cal):
     assert len(http.urls) == 1  # cached
     assert agenda.describe(events[0]) == "Mon 28 Sep 09:30–09:45: Team standup (Zoom)"
     assert agenda.describe(events[1]) == "Wed 30 Sep, all day: Sara's birthday"
+
+
+def test_failures_never_log_the_secret_link_and_are_retried_later(cal, caplog):
+    class Failing:
+        calls = 0
+
+        def get(self, url, **kw):
+            self.calls += 1
+            return SimpleNamespace(status_code=404, content=b"")
+
+    http = Failing()
+    assert agenda.today(cal, client=http) == []
+    assert agenda.today(cal, client=http) == []  # the (failed) answer is cached briefly
+    assert http.calls == 1
+    agenda._today.clear()
+    assert agenda.today(cal, client=http) == [] and http.calls == 1  # still waiting before retrying
+    assert "private-abc" not in caplog.text and "404" in caplog.text
+
+
+def test_today_is_cached(cal):
+    http = FakeHTTP(ICS)
+    agenda.today(cal, client=http)
+    agenda._cache.clear()  # even the parsed result is kept, not just the download
+    agenda.today(cal, client=http)
+    assert len(http.urls) == 1
 
 
 def test_broken_calendar_is_skipped(cal):

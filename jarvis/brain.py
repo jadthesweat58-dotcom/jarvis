@@ -41,6 +41,8 @@ Describe what is on the screen that helps with that: which apps or windows are o
 text (quote exact wording, numbers, error messages and names that matter), and anything else
 relevant. Plain text, under 200 words."""
 
+CLAUDE_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+
 # approver(tool, args, summary) -> True to run the tool, False to decline.
 Approver = Callable[[Tool, dict, str], bool]
 
@@ -171,6 +173,10 @@ class Brain:
         import base64
 
         kind = "document" if mime == "application/pdf" else "image"
+        if kind == "image" and (mime not in CLAUDE_IMAGE_TYPES or len(data) > 5 * 1024 * 1024):
+            from jarvis.files import FileError
+
+            raise FileError("With the Claude brain, pictures must be JPEG, PNG, GIF or WebP and under 5 MB.")
         params: dict[str, Any] = {
             "model": self.settings.model,
             "max_tokens": 4000,

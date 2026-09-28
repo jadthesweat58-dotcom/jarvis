@@ -27,6 +27,13 @@ _FUNCS = {"sqrt": math.sqrt, "abs": abs, "round": round, "floor": math.floor, "c
           "sin": math.sin, "cos": math.cos, "tan": math.tan, "asin": math.asin, "acos": math.acos,
           "atan": math.atan, "radians": math.radians, "degrees": math.degrees, "factorial": math.factorial}
 _NAMES = {"pi": math.pi, "e": math.e, "tau": math.tau}
+MAX_BITS = 12_000   # biggest whole number allowed (~3,600 digits): keeps every sum instant
+
+
+def _fits(value):
+    if isinstance(value, int) and value.bit_length() > MAX_BITS:
+        raise ToolError("That number is too large to work out.")
+    return value
 
 
 def calc(expression: str) -> float | int:
@@ -48,9 +55,10 @@ def calc(expression: str) -> float | int:
             return node.value
         if isinstance(node, ast.BinOp) and type(node.op) in _BINARY:
             left, right = ev(node.left), ev(node.right)
-            if isinstance(node.op, ast.Pow) and (abs(right) > 1000 or abs(left) > 1e6 and abs(right) > 50):
+            if isinstance(node.op, ast.Pow) and abs(right) > 1 and abs(left) > 1 and (
+                    abs(right) > MAX_BITS or math.log2(abs(left)) * abs(right) > MAX_BITS):
                 raise ToolError("That number is too large to work out.")
-            return _BINARY[type(node.op)](left, right)
+            return _fits(_BINARY[type(node.op)](left, right))
         if isinstance(node, ast.UnaryOp) and type(node.op) in _UNARY:
             return _UNARY[type(node.op)](ev(node.operand))
         if isinstance(node, ast.Name) and node.id in _NAMES:
@@ -60,7 +68,7 @@ def calc(expression: str) -> float | int:
             args = [ev(a) for a in node.args]
             if node.func.id == "factorial" and (not args or args[0] > 500):
                 raise ToolError("That number is too large to work out.")
-            return _FUNCS[node.func.id](*args)
+            return _fits(_FUNCS[node.func.id](*args))
         raise ToolError("Only numbers, + - * / // % ** and math functions like sqrt() are allowed.")
 
     try:

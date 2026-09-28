@@ -401,7 +401,7 @@
       const a = el("a", "", "Open Telegram and press Start");
       a.href = link; a.target = "_blank"; a.rel = "noopener";
       box.append(a, el("br"), document.createTextNode("or send the bot: "), el("code", "", `/start ${code}`),
-                 el("br"), document.createTextNode("The code works once, for 15 minutes."));
+                 el("br"), document.createTextNode("The link works once, for 15 minutes."));
       box.hidden = false;
     } catch (e) { toast(e.message, true); }
   };

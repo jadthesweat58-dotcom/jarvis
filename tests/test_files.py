@@ -114,3 +114,12 @@ def test_chat_with_a_file_over_http(ctx):
     assert client.post("/api/chat", json={"text": "  "}).status_code == 400
     # The conversation still works after the failed uploads.
     assert client.post("/api/chat", json={"text": "thanks"}).json()["reply"] == "Here you go."
+
+
+def test_claude_refuses_pictures_it_cant_take(ctx):
+    brain = Brain(ctx, client=FakeClaude())
+    for name, data, mime in (("IMG_1.HEIC", b"x" * 100, "image/heic"),
+                             ("big.jpg", b"x" * (6 * 1024 * 1024), "image/jpeg")):
+        with pytest.raises(files.FileError, match="under 5 MB"):
+            brain.chat("what's this?", attachment=(name, data, mime))
+    assert brain.messages == []
