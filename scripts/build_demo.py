@@ -26,7 +26,10 @@ def build() -> str:
     # The artifact host supplies the document skeleton, charset/viewport and favicon.
     for pattern in (r"<!doctype html>\s*", r"<html[^>]*>\s*", r"</?head>\s*", r"<body>\s*",
                     r"</body>\s*", r"</html>\s*", r'<meta charset="utf-8">\s*',
-                    r'<meta name="viewport"[^>]*>\s*', r'<link rel="icon" href="data:[^"]*">\s*'):
+                    r'<meta name="viewport"[^>]*>\s*', r'<link rel="icon" href="data:[^"]*">\s*',
+                    # installing as an app and push notifications need the real server
+                    r'<link rel="(?:manifest|apple-touch-icon)"[^>]*>\s*',
+                    r'<meta name="(?:theme-color|mobile-web-app-capable|apple-mobile-web-app-[\w-]+)"[^>]*>\s*'):
         html = re.sub(pattern, "", html, flags=re.IGNORECASE)
 
     dark = ":root { color-scheme: dark; }\nhtml, body { background: #030912; }\n"

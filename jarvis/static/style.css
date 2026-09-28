@@ -123,6 +123,10 @@ i[data-icon] svg { width: 100%; height: 100%; fill: none; stroke: currentColor; 
 }
 .menu label { display: flex; gap: 10px; align-items: center; }
 .menu button { text-align: left; color: var(--accent); }
+.menu button[disabled] { opacity: 0.5; }
+.menu-note { margin: -4px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; overflow-wrap: anywhere; }
+.menu-note a { color: var(--accent); }
+.menu-note code { font-size: 15px; letter-spacing: 0.2em; color: var(--text); }
 
 /* core ring */
 .core { position: relative; flex: 1; min-height: 300px; display: grid; place-items: center; }
@@ -168,6 +172,15 @@ i[data-icon] svg { width: 100%; height: 100%; fill: none; stroke: currentColor; 
 .box-input .send { padding: 11px 18px; border-radius: 12px; }
 .screen-btn { width: 44px; height: 44px; border: 1px solid var(--line-2); border-radius: 12px; }
 .screen-btn.on { background: var(--accent-soft); border-color: var(--accent); color: #fff; box-shadow: 0 0 14px var(--glow); }
+.file-chip {
+  display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; max-width: 100%;
+  padding: 6px 8px 6px 10px; border: 1px solid var(--accent); border-radius: 10px; background: var(--accent-soft); font-size: 13px;
+}
+.file-chip i { width: 16px; height: 16px; flex: none; color: var(--accent); }
+.file-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-chip button { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--text-2); }
+.file-chip button:hover { background: var(--accent-soft); color: #fff; }
+.chatbox.dragging { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), 0 0 24px var(--glow); }
 .screen-chip { display: inline-flex; align-items: center; gap: 6px; letter-spacing: 0; font-size: 12px; color: var(--ok); }
 .screen-chip .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 6px var(--ok); }
 .talk {
@@ -198,6 +211,9 @@ i[data-icon] svg { width: 100%; height: 100%; fill: none; stroke: currentColor; 
 .tl-track li.now::before { width: 13px; height: 13px; top: -1px; border: 2px solid #dff1ff; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
 .tl-when { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tl-what { font-size: 15px; font-weight: 500; color: var(--text); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-track li.event::before { border-radius: 3px; transform: rotate(45deg); border-color: var(--ok); }
+.tl-track li.event.now::before { background: var(--ok); border-color: #dcfff0; box-shadow: 0 0 10px var(--ok); }
+.tl-track li.event .tl-when { color: #7fe3b8; }
 .tl-track .empty { grid-column: 1 / -1; padding-top: 22px; color: var(--muted); }
 .tl-track .empty::before { display: none; }
 
@@ -255,6 +271,13 @@ i[data-icon] svg { width: 100%; height: 100%; fill: none; stroke: currentColor; 
 .meter span { font-size: 13.5px; color: var(--text-2); }
 .meter canvas { width: 100%; height: 30px; display: block; }
 .meter strong { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage { display: grid; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13.5px; }
+.usage-row { display: flex; justify-content: space-between; gap: 12px; color: var(--text-2); }
+.usage-row strong { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.usage-bar { height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; }
+.usage-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.4s ease; }
+.usage-bar.warn i { background: var(--warn); }
+.usage-bar.bad i { background: var(--bad); }
 
 /* ---------------------------------------------------------------- drawer */
 .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.45); }

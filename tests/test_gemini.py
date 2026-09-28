@@ -136,3 +136,25 @@ def test_gemini_looks_at_the_screen(gctx):
     assert look[0]["inline_data"]["mime_type"] == "image/png"
     assert gemini.requests[0]["config"].thinking_config.thinking_level == types.ThinkingLevel.LOW
     assert "1.2M" in gemini.requests[1]["contents"][-1]["parts"][-1]["text"]
+
+
+def test_gemini_usage_is_counted(gctx):
+    from jarvis import usage
+
+    answer = types.GenerateContentResponse.model_validate({
+        "candidates": [{"content": {"role": "model", "parts": [{"text": "Hello."}]}, "finish_reason": "STOP"}],
+        "usage_metadata": {"prompt_token_count": 900, "candidates_token_count": 40, "thoughts_token_count": 60},
+    })
+    GeminiBrain(gctx, client=FakeGemini(answer)).chat("hi")
+    assert usage.summary(gctx)["today"] == {"ai_calls": 1, "ai_tokens_in": 900, "ai_tokens_out": 100, "tts_chars": 0}
+
+
+def test_gemini_reads_scanned_pdfs(gctx):
+    from tests.test_files import make_pdf
+
+    fake = FakeGemini(reply({"text": "A DEWA bill for 450 AED, due 5 October."}), reply({"text": "It's 450 AED."}))
+    out = GeminiBrain(gctx, client=fake).chat("how much is this bill?", attachment=("bill.pdf", make_pdf(""), "application/pdf"))
+    assert out.text == "It's 450 AED."
+    look = fake.requests[0]["contents"]
+    assert look[0]["inline_data"]["mime_type"] == "application/pdf" and "bill.pdf" in look[1]
+    assert "DEWA bill for 450 AED" in str(fake.requests[1]["contents"][-1])

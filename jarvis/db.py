@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS reminders (
     due_at TEXT NOT NULL,              -- UTC ISO timestamp
     notify_by TEXT NOT NULL DEFAULT '["app"]',
     status TEXT NOT NULL DEFAULT 'pending',   -- pending | fired | cancelled
+    repeat_rule TEXT,                  -- daily | weekdays | weekly | monthly:<day>, or NULL
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS contacts (
@@ -63,6 +64,18 @@ CREATE TABLE IF NOT EXISTS kv (
     key TEXT PRIMARY KEY,               -- small bits of state, e.g. when the last briefing went out
     value TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint TEXT NOT NULL UNIQUE,     -- where the browser's push service accepts messages
+    data TEXT NOT NULL,                -- the full subscription (keys) as JSON
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS usage_log (
+    day TEXT NOT NULL,                 -- local date, YYYY-MM-DD
+    kind TEXT NOT NULL,                -- ai_calls | ai_tokens_in | ai_tokens_out | tts_chars
+    amount INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, kind)
+);
 CREATE TABLE IF NOT EXISTS phone_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     call_sid TEXT,
@@ -81,6 +94,7 @@ CREATE TABLE IF NOT EXISTS phone_calls (
 # Columns added after the first release; added to existing databases on startup.
 MIGRATIONS = [
     "ALTER TABLE todos ADD COLUMN priority TEXT NOT NULL DEFAULT 'med'",
+    "ALTER TABLE reminders ADD COLUMN repeat_rule TEXT",
 ]
 
 

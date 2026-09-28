@@ -63,21 +63,31 @@ class GeminiBrain(Brain):
 
     def _request(self) -> types.GenerateContentResponse:
         contents = [types.Content.model_validate(m) for m in self.messages]
-        return self._client().models.generate_content(
+        response = self._client().models.generate_content(
             model=self.settings.model, contents=contents, config=self._config()
         )
+        self._count_usage(response)
+        return response
 
-    def describe_image(self, data: bytes, mime: str, question: str) -> str:
+    def _count_usage(self, response: Any) -> None:
+        u = getattr(response, "usage_metadata", None)
+        tokens_out = (int(getattr(u, "candidates_token_count", 0) or 0)
+                      + int(getattr(u, "thoughts_token_count", 0) or 0)) if u else 0
+        self._add_usage(1, int(getattr(u, "prompt_token_count", 0) or 0) if u else 0, tokens_out)
+
+    def describe_image(self, data: bytes, mime: str, question: str, prompt: str | None = None) -> str:
+        """What the AI sees in a picture (or a PDF's pages)."""
         config = types.GenerateContentConfig()
         if self.settings.model.startswith("gemini-3"):
             config.thinking_config = types.ThinkingConfig(thinking_level="LOW")
         response = self._client().models.generate_content(
             model=self.settings.model,
             contents=[types.Part.from_bytes(data=data, mime_type=mime),
-                      VISION_PROMPT.format(question=question[:500])],
+                      prompt or VISION_PROMPT.format(question=question[:500])],
             config=config,
         )
-        return (response.text or "").strip() or "I couldn't make out the screen."
+        self._count_usage(response)
+        return (response.text or "").strip() or "I couldn't make out that picture."
 
     # --- conversation ----------------------------------------------------------------
     def _user_turn(self, text: str) -> dict:
@@ -135,6 +145,7 @@ class GeminiBrain(Brain):
                 contents=f"Search the web and answer with the key facts, figures and dates: {query}{where}",
                 config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())]),
             )
+            self._count_usage(response)
             answer = (response.text or "").strip() or "No results found."
             sources = []
             meta = response.candidates[0].grounding_metadata if response.candidates else None

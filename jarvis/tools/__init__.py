@@ -109,4 +109,4 @@ def available_tools(settings: "Settings") -> list[Tool]:
 
 def load_all() -> None:
     # Importing the modules runs their @tool decorators.
-    from jarvis.tools import calls, computer, memory, notes, reminders, web  # noqa: F401
+    from jarvis.tools import calls, computer, extras, memory, notes, reminders, web  # noqa: F401

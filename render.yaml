@@ -32,6 +32,12 @@ services:
         sync: false
       - key: ELEVENLABS_VOICE_ID
         sync: false
+      # Your calendar's secret iCal link (optional, read-only)
+      - key: CALENDAR_ICS_URL
+        sync: false
+      # Telegram bot token from @BotFather (optional)
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
       - key: TWILIO_ACCOUNT_SID
         sync: false
       - key: TWILIO_AUTH_TOKEN

@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>JARVIS Command Center</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='40' fill='none' stroke='%233aa6ff' stroke-width='8'/><circle cx='50' cy='50' r='14' fill='%233aa6ff'/></svg>">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+  <meta name="theme-color" content="#07111b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Jarvis">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -61,7 +68,14 @@
       <div class="menu" id="menu" hidden>
         <label><input type="checkbox" id="speakToggle" checked> Speak replies out loud</label>
         <label><input type="checkbox" id="wakeToggle"> "Hey Jarvis" wake word</label>
+        <label id="pushRow"><input type="checkbox" id="pushToggle"> Notifications on this device</label>
+        <p class="menu-note" id="pushNote" hidden></p>
+        <button id="pushTest" type="button" hidden>Send a test notification</button>
+        <button id="installBtn" type="button" hidden>Install Jarvis as an app</button>
+        <button id="telegramBtn" type="button" hidden>Link Telegram</button>
+        <div class="menu-note" id="telegramBox" hidden></div>
         <button id="newChat" type="button">Start a new conversation</button>
+        <button id="exportBtn" type="button">Download my data</button>
         <button id="lockBtn" type="button">Lock (forget access token)</button>
       </div>
     </header>
@@ -89,8 +103,11 @@
       <div class="box-log" id="boxLog" aria-live="polite"></div>
       <div class="said-actions" id="capActions"></div>
       <div class="box-live" id="capUser"></div>
+      <div class="file-chip" id="fileChip" hidden><i data-icon="file"></i><span id="fileName"></span><button type="button" id="fileClear" aria-label="Remove the file"><i data-icon="x"></i></button></div>
       <form class="box-input" id="boxForm">
         <input id="boxInput" autocomplete="off" placeholder="Message Jarvis…" aria-label="Message Jarvis">
+        <button type="button" class="icon-btn screen-btn" id="attachBtn" title="Attach a file (PDF, picture, document)" aria-label="Attach a file"><i data-icon="clip"></i></button>
+        <input type="file" id="fileInput" hidden accept=".pdf,.docx,.txt,.md,.csv,.json,.xml,.html,.log,.py,.js,.ts,image/*,text/*">
         <button type="button" class="icon-btn screen-btn" id="screenBtn" title="Share your screen with Jarvis" aria-label="Share your screen with Jarvis" aria-pressed="false"><i data-icon="eye"></i></button>
         <button type="submit" class="send">Send</button>
         <button type="button" class="talk" id="talkBtn"><i data-icon="mic" id="talkIcon"></i><span id="talkLabel">Talk</span></button>
@@ -121,6 +138,11 @@
     <section class="panel monitor">
       <div class="panel-head"><span>SYSTEM MONITOR</span><em id="monitorWhere">Live</em></div>
       <div class="meters" id="meters"></div>
+      <div class="usage" id="usage" hidden>
+        <div class="usage-row"><span>AI today</span><strong id="usageAi">—</strong></div>
+        <div class="usage-row" id="usageVoiceRow" hidden><span>Voice this month</span><strong id="usageVoice">—</strong></div>
+        <div class="usage-bar" id="usageBarWrap" hidden><i id="usageBar"></i></div>
+      </div>
     </section>
   </aside>
 </div>

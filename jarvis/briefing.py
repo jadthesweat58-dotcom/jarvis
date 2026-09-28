@@ -47,6 +47,17 @@ def gather(ctx: Context) -> dict[str, Any]:
         "SELECT task, due, priority FROM todos WHERE done = 0 "
         "ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'med' THEN 1 ELSE 2 END, id LIMIT 5")
     facts["open_tasks"] = int(ctx.db.one("SELECT COUNT(*) AS n FROM todos WHERE done = 0")["n"] or 0)
+    if s.calendar_urls:
+        try:
+            from jarvis import agenda
+
+            facts["events"] = [
+                {"time": "all day" if e["all_day"] else datetime.fromisoformat(e["start"]).strftime("%H:%M"),
+                 "title": e["title"], "location": e["location"]}
+                for e in agenda.today(ctx)
+            ]
+        except Exception:
+            log.info("Calendar unavailable for the briefing", exc_info=True)
     return facts
 
 
@@ -61,6 +72,10 @@ def as_text(facts: dict[str, Any]) -> str:
                         f"{today.get('rain_chance')}% chance of rain." if today else "."))
     elif facts.get("city"):
         lines.append("Weather: unavailable right now.")
+    if "events" in facts:
+        lines.append("Calendar today: " + ("; ".join(
+            f"{e['time']} {e['title']}" + (f" at {e['location']}" if e["location"] else "")
+            for e in facts["events"]) or "nothing."))
     if facts["reminders"]:
         lines.append("Reminders today: " + "; ".join(f"{r['time']} {r['message']}" for r in facts["reminders"]))
     else:
@@ -81,6 +96,10 @@ def fallback(facts: dict[str, Any]) -> str:
     w = facts.get("weather")
     if w:
         bits.append(f"In {w['place'].split(',')[0]} it's {round(w['temperature'])}{w['unit']} and {w['summary']}.")
+    events = facts.get("events") or []
+    if events:
+        bits.append(f"On your calendar: {events[0]['title']} ({events[0]['time']})"
+                    + (f" and {len(events) - 1} more." if len(events) > 1 else "."))
     n = len(facts["reminders"])
     bits.append(f"You have {n} reminder{'s' if n != 1 else ''} today" + (
         f", starting with {facts['reminders'][0]['message']} at {facts['reminders'][0]['time']}." if n else "."))
@@ -103,7 +122,7 @@ def compose(ctx: Context, make_brain: Callable[..., Any], fresh: bool = False) -
     facts = gather(ctx)
     prompt = f"""Give me my briefing for today, written to be read aloud: about 120-170 words, warm
 and crisp, in your JARVIS voice, no lists, headings or emoji. Open with "Good {_part_of_day(facts['time'])},
-{facts['name']}." Cover, in this order: the weather; today's reminders; the most important open tasks;
+{facts['name']}." Cover, in this order: the weather; today's calendar events; today's reminders; the most important open tasks;
 then search the web and give the top 3 news headlines for today, focused on the UAE{
 " and " + facts["city"] if facts.get("city") else ""} plus one big world story, one short sentence each.
 Skip anything that's missing rather than mentioning it.

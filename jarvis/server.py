@@ -25,13 +25,16 @@ from pydantic import BaseModel
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
-from jarvis import briefing
+from jarvis import agenda, briefing, push, usage
 from jarvis.app import build_context
 from jarvis.brain import Brain, create_brain, resolve_action
 from jarvis.db import utcnow
+from jarvis.files import FileError
 from jarvis.phone import say
 from jarvis.scheduler import ReminderLoop
+from jarvis.telegram import TelegramBot
 from jarvis.tools import Context, ToolError, available_tools
+from jarvis.tools.reminders import describe_repeat
 from jarvis.tools.web import fetch_weather
 from jarvis.voice import ElevenLabsVoice, VoiceError
 
@@ -41,9 +44,15 @@ LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 HANGUP = "[HANGUP]"
 
 
+class FileIn(BaseModel):
+    name: str
+    data: str  # the file as a data: URL
+
+
 class ChatIn(BaseModel):
-    text: str
+    text: str = ""
     image: str | None = None  # optional screenshot as a data: URL (screen sharing)
+    file: FileIn | None = None  # optional attached file (PDF, picture, document…)
 
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -64,6 +73,37 @@ def decode_image(data_url: str) -> tuple[bytes, str]:
     if len(data) > MAX_IMAGE_BYTES:
         raise HTTPException(413, "The screenshot is too large (5 MB max).")
     return data, match.group(1)
+
+
+MAX_FILE_BYTES = 10 * 1024 * 1024
+DATA_URL = re.compile(r"^data:([\w.+-]+/[\w.+-]+)?(?:;[\w.+-]+=[^;,]*)*;base64,([A-Za-z0-9+/=\s]*)$")
+
+
+def decode_file(data_url: str) -> tuple[bytes, str]:
+    import base64
+    import binascii
+
+    match = DATA_URL.match(data_url or "")
+    if not match:
+        raise HTTPException(400, "The file couldn't be read.")
+    if len(match.group(2)) > MAX_FILE_BYTES * 4 // 3 + 16:
+        raise HTTPException(413, "That file is too large (10 MB max).")
+    try:
+        data = base64.b64decode(match.group(2), validate=False)
+    except binascii.Error as exc:
+        raise HTTPException(400, "The file couldn't be read.") from exc
+    if len(data) > MAX_FILE_BYTES:
+        raise HTTPException(413, "That file is too large (10 MB max).")
+    return data, match.group(1) or ""
+
+
+class PushSubIn(BaseModel):
+    endpoint: str
+    keys: dict[str, str] = {}
+
+
+class EndpointIn(BaseModel):
+    endpoint: str
 
 
 class ActionIn(BaseModel):
@@ -103,9 +143,12 @@ formatting. When the conversation is over, say a brief goodbye and end your repl
 def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] | None = None,
                voice: ElevenLabsVoice | None = None) -> FastAPI:
     ctx = ctx or build_context()
-    voice = voice or ElevenLabsVoice(ctx.settings)
+    voice = voice or ElevenLabsVoice(ctx.settings, on_usage=lambda n: usage.record(ctx, {"tts_chars": n}))
     make_brain = brain_factory or (lambda **kw: create_brain(ctx, **kw))
     main_brain = make_brain(conversation_id="main")
+    telegram = TelegramBot(ctx, make_brain)
+    ctx.notifier.subscribe(lambda e: push.forward(ctx, e))  # phone notifications
+    ctx.notifier.subscribe(telegram.forward)
     call_brains: dict[int, Brain] = {}
     feed: deque[dict] = deque(maxlen=30)  # recent notifications, for the live feed
     ctx.notifier.subscribe(feed.appendleft)
@@ -120,10 +163,12 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
 
         loop = ReminderLoop(ctx, on_tick=morning_briefing)
         loop.start()
+        threading.Thread(target=telegram.start, name="telegram-setup", daemon=True).start()
         if not ctx.settings.access_token:
             log.warning("JARVIS_ACCESS_TOKEN is not set: only this computer (localhost) can use Jarvis.")
         yield
         loop.stop()
+        telegram.stop()
 
     app = FastAPI(title="Jarvis", lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -181,9 +226,19 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             raise HTTPException(403, "Invalid Twilio signature.")
         return form
 
-    def run_chat(brain: Brain, text: str, image: tuple[bytes, str] | None = None) -> dict[str, Any]:
+    def run_chat(brain: Brain, text: str, image: tuple[bytes, str] | None = None,
+                 attachment: tuple[str, bytes, str] | None = None) -> dict[str, Any]:
+        extra: dict[str, Any] = {}
+        if image:
+            extra["image"] = image
+        if attachment:
+            extra["attachment"] = attachment
         try:
-            reply = brain.chat(text, image=image) if image else brain.chat(text)
+            reply = brain.chat(text, **extra)
+        except HTTPException:
+            raise
+        except FileError as exc:  # e.g. a file type Jarvis can't read
+            raise HTTPException(400, str(exc)) from exc
         except Exception as exc:
             log.exception("Chat failed")
             raise HTTPException(500, f"Jarvis hit a problem: {exc}") from exc
@@ -198,6 +253,16 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     def index() -> FileResponse:
         return FileResponse(STATIC / "index.html")
 
+    # Served from the site root so it can show notifications for the whole app.
+    @app.get("/sw.js")
+    def service_worker() -> FileResponse:
+        return FileResponse(STATIC / "sw.js", media_type="text/javascript",
+                            headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+    @app.get("/manifest.webmanifest")
+    def manifest() -> FileResponse:
+        return FileResponse(STATIC / "manifest.webmanifest", media_type="application/manifest+json")
+
     @app.get("/api/status", dependencies=[Depends(require_user)])
     def status() -> dict[str, Any]:
         s = ctx.settings
@@ -206,14 +271,21 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
                 "two_way_calls": s.twilio_enabled and bool(s.public_base_url),
                 "ai_name": s.provider_name, "ai_ready": bool(s.ai_key), "web_search": bool(s.ai_key),
                 "home_city": s.home_city, "timezone": s.timezone, "started_at": started_at,
-                "tts": "elevenlabs" if voice.enabled else "browser"}
+                "tts": "elevenlabs" if voice.enabled else "browser", "calendar": bool(s.calendar_urls),
+                "telegram": {"enabled": s.telegram_enabled, "linked": telegram.owner_chat is not None}}
 
     @app.post("/api/chat", dependencies=[Depends(require_user)])
     def chat(body: ChatIn) -> dict[str, Any]:
-        if not body.text.strip():
+        text = body.text.strip()
+        if not text and not body.file:
             raise HTTPException(400, "Say something first.")
         image = decode_image(body.image) if body.image else None
-        return run_chat(main_brain, body.text.strip(), image)
+        attachment = None
+        if body.file:
+            data, mime = decode_file(body.file.data)
+            attachment = (body.file.name, data, mime)
+            text = text or "Please read this and give me a short summary of what matters."
+        return run_chat(main_brain, text, image, attachment)
 
     @app.post("/api/reset", dependencies=[Depends(require_user)])
     def reset() -> dict[str, bool]:
@@ -245,6 +317,8 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             "ORDER BY due_at LIMIT 12", (midnight.astimezone(timezone.utc).isoformat(timespec="seconds"),))
         for r in timeline:
             r["time_local"] = local(r["due_at"]).strftime("%H:%M")
+            r["kind"] = "reminder"
+        timeline = sorted(timeline + calendar_today(), key=lambda r: r["due_at"])[:14]
         # One round trip for every count (matters when the database is online).
         counts = ctx.db.one(
             "SELECT (SELECT COUNT(*) FROM facts) AS facts, (SELECT COUNT(*) FROM notes) AS notes, "
@@ -268,6 +342,27 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             "system": system_stats(),
             "feed": list(feed),
         }
+
+    def calendar_today() -> list[dict[str, Any]]:
+        """Today's calendar events, shaped like timeline reminders."""
+        if not ctx.settings.calendar_urls:
+            return []
+        try:
+            events = agenda.today(ctx)
+        except Exception:
+            log.warning("Calendar unavailable", exc_info=True)
+            return []
+        now = datetime.now(timezone.utc)
+        items = []
+        for i, e in enumerate(events):
+            start = datetime.fromisoformat(e["start"])
+            finished = datetime.fromisoformat(e["end"]) <= now
+            items.append({"id": f"event-{i}", "kind": "event", "message": e["title"],
+                          "location": e["location"], "all_day": e["all_day"],
+                          "due_at": start.astimezone(timezone.utc).isoformat(timespec="seconds"),
+                          "time_local": "All day" if e["all_day"] else start.strftime("%H:%M"),
+                          "status": "fired" if finished else "pending"})
+        return items
 
     def tasks() -> list[dict[str, Any]]:
         return ctx.db.query(
@@ -300,6 +395,76 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     @app.get("/api/system", dependencies=[Depends(require_user)])
     def system() -> dict[str, float]:
         return system_stats()
+
+    @app.get("/api/usage", dependencies=[Depends(require_user)])
+    def get_usage() -> dict[str, Any]:
+        return usage.summary(ctx)
+
+    @app.get("/api/export", dependencies=[Depends(require_user)])
+    def export() -> Response:
+        """Everything Jarvis remembers about you, as a JSON file (no keys or secrets)."""
+        data = {"exported_at": utcnow(), "name": ctx.settings.my_name}
+        for table in ("facts", "notes", "todos", "reminders", "contacts", "phone_calls"):
+            data[table] = ctx.db.query(f"SELECT * FROM {table} ORDER BY id")
+        stamp = datetime.now(ctx.settings.tz).strftime("%Y-%m-%d")
+        return Response(json.dumps(data, indent=2, default=str), media_type="application/json",
+                        headers={"Content-Disposition": f'attachment; filename="jarvis-memory-{stamp}.json"',
+                                 "Cache-Control": "no-store"})
+
+    # --- phone notifications (Web Push) ---------------------------------------------
+    @app.get("/api/push/key", dependencies=[Depends(require_user)])
+    def push_key() -> dict[str, Any]:
+        return {"key": push.public_key(ctx), "subscribers": push.count(ctx)}
+
+    @app.post("/api/push/subscribe", dependencies=[Depends(require_user)])
+    def push_subscribe(body: PushSubIn) -> dict[str, bool]:
+        try:
+            push.save_subscription(ctx, body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"ok": True}
+
+    @app.post("/api/push/unsubscribe", dependencies=[Depends(require_user)])
+    def push_unsubscribe(body: EndpointIn) -> dict[str, bool]:
+        return {"ok": push.remove_subscription(ctx, body.endpoint)}
+
+    @app.post("/api/push/test", dependencies=[Depends(require_user)])
+    def push_test() -> dict[str, int]:
+        sent = push.send_all(ctx, "Jarvis", f"Notifications are working, {ctx.settings.my_name}.", tag="test")
+        if not sent:
+            raise HTTPException(409, "No device accepted the test notification. Turn notifications on first.")
+        return {"sent": sent}
+
+    # --- Telegram --------------------------------------------------------------------------
+    @app.post("/api/telegram/link", dependencies=[Depends(require_user)])
+    def telegram_link() -> dict[str, Any]:
+        if not telegram.enabled:
+            raise HTTPException(404, "Add TELEGRAM_BOT_TOKEN to the server settings first.")
+        code = telegram.new_link_code()
+        try:
+            bot = telegram.username()
+        except Exception as exc:
+            raise HTTPException(502, f"Telegram didn't accept the bot token: {exc}") from exc
+        return {"code": code, "bot": bot, "link": f"https://t.me/{bot}?start={code}"}
+
+    @app.post("/api/telegram/unlink", dependencies=[Depends(require_user)])
+    def telegram_unlink() -> dict[str, bool]:
+        telegram.unlink()
+        return {"ok": True}
+
+    @app.post("/telegram/webhook")
+    async def telegram_webhook(request: Request) -> Response:
+        # Only Telegram knows the secret (it was given it when the webhook was set).
+        if not telegram.enabled or not telegram.check_secret(
+                request.headers.get("x-telegram-bot-api-secret-token", "")):
+            raise HTTPException(404, "Not found.")
+        try:
+            update = await request.json()
+        except ValueError:
+            return Response(status_code=200)
+        if isinstance(update, dict):
+            telegram.handle_async(update)
+        return Response(status_code=200)
 
     @app.post("/api/briefing", dependencies=[Depends(require_user)])
     def get_briefing() -> dict[str, str]:
@@ -343,19 +508,24 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             "facts": "SELECT id, fact AS title, category AS detail FROM facts ORDER BY id DESC",
             "notes": "SELECT id, title, body AS detail FROM notes ORDER BY id DESC LIMIT 100",
             "todos": "SELECT id, task AS title, COALESCE(due, '') AS detail, done FROM todos ORDER BY done, id DESC LIMIT 100",
-            "reminders": "SELECT id, message AS title, due_at AS detail, status FROM reminders ORDER BY due_at DESC LIMIT 100",
+            "reminders": "SELECT id, message AS title, due_at AS detail, status, repeat_rule FROM reminders ORDER BY due_at DESC LIMIT 100",
             "contacts": "SELECT id, name AS title, phone || ' ' || relationship AS detail FROM contacts ORDER BY name",
             "calls": "SELECT id, contact_name AS title, direction || ' · ' || status || ' · ' || created_at AS detail FROM phone_calls ORDER BY id DESC LIMIT 50",
         }
         if kind == "tools":
             tools = [{"id": i, "title": t.name, "detail": t.description} for i, t in enumerate(available_tools(ctx.settings))]
-            return tools + [{"id": len(tools), "title": "web_search", "detail": "Search the web (built into Claude)."}]
+            if not any(t["title"] == "web_search" for t in tools):
+                tools.append({"id": len(tools), "title": "web_search", "detail": "Search the web for current information."})
+            return tools
         if kind not in queries:
             raise HTTPException(404, "Unknown list.")
         rows = ctx.db.query(queries[kind])
         if kind == "reminders":
             for r in rows:
                 r["detail"] = datetime.fromisoformat(r["detail"]).astimezone(ctx.settings.tz).strftime("%a %d %b %H:%M") + f" · {r['status']}"
+                rule = r.pop("repeat_rule", None)
+                if rule and r["status"] == "pending":
+                    r["detail"] += f" · repeats {describe_repeat(rule)}"
         return rows
 
     @app.get("/api/weather", dependencies=[Depends(require_user)])

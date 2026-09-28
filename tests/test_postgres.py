@@ -29,7 +29,7 @@ def pg_url(tmp_path_factory):
 def pg(pg_url):
     db = PostgresDatabase(pg_url)
     for table in ("facts", "notes", "todos", "reminders", "contacts", "conversations",
-                  "pending_actions", "phone_calls", "kv"):
+                  "pending_actions", "phone_calls", "kv", "usage_log", "push_subscriptions"):
         db.execute(f"DELETE FROM {table}")
     return db
 
@@ -97,3 +97,28 @@ def test_key_value_state_on_postgres(pg):
     pg.set_kv("last_briefing", "2026-09-27")
     pg.set_kv("last_briefing", "2026-09-28")
     assert pg.get_kv("last_briefing") == "2026-09-28"
+
+
+def test_new_tables_on_postgres(pg, settings, monkeypatch):
+    from jarvis import push, safeurl, usage
+
+    ctx = build_context(settings, db=pg)
+    usage.record(ctx, {"ai_calls": 1, "ai_tokens_in": 500})
+    usage.record(ctx, {"ai_calls": 1, "ai_tokens_in": 250})
+    assert usage.summary(ctx)["today"]["ai_tokens_in"] == 750  # upsert adds up
+
+    monkeypatch.setattr(safeurl.socket, "getaddrinfo",
+                        lambda host, port, *a, **kw: [(2, 1, 6, "", ("142.250.1.1", port))])
+    sub = {"endpoint": "https://fcm.googleapis.com/fcm/send/x", "keys": {"p256dh": "k", "auth": "a"}}
+    push.save_subscription(ctx, sub)
+    push.save_subscription(ctx, sub)
+    assert push.count(ctx) == 1
+    assert push.public_key(ctx) == push.public_key(ctx)
+
+    # A repeating reminder moves on instead of being marked fired.
+    run(ctx, "set_reminder", message="Water plants", in_minutes=5, repeat="daily")
+    past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(timespec="seconds")
+    pg.execute("UPDATE reminders SET due_at = ?", (past,))
+    assert fire_due_reminders(ctx) == 1 and fire_due_reminders(ctx) == 0
+    row = pg.one("SELECT status, due_at FROM reminders")
+    assert row["status"] == "pending" and row["due_at"] > past

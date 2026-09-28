@@ -10,6 +10,7 @@ from typing import Callable
 from datetime import datetime, timezone
 
 from jarvis.tools import Context
+from jarvis.tools.reminders import next_due
 
 log = logging.getLogger("jarvis.scheduler")
 
@@ -20,10 +21,25 @@ def fire_due_reminders(ctx: Context) -> int:
         "SELECT * FROM reminders WHERE status = 'pending' AND due_at <= ? ORDER BY due_at", (now,)
     )
     for r in due:
-        # Claim it first so a reminder never fires twice.
-        if not ctx.db.execute(
-            "UPDATE reminders SET status = 'fired' WHERE id = ? AND status = 'pending'", (r["id"],)
-        ):
+        # Claim it first so a reminder never fires twice. A repeating one is claimed
+        # by moving it on to its next time instead of marking it fired.
+        if r.get("repeat_rule"):
+            try:
+                following = next_due(r["due_at"], r["repeat_rule"], ctx.settings.tz)
+            except ValueError:
+                log.exception("Bad repeat rule on reminder #%s", r["id"])
+                following = None
+            if following:
+                claimed = ctx.db.execute(
+                    "UPDATE reminders SET due_at = ? WHERE id = ? AND status = 'pending' AND due_at = ?",
+                    (following, r["id"], r["due_at"]))
+            else:
+                claimed = ctx.db.execute(
+                    "UPDATE reminders SET status = 'fired' WHERE id = ? AND status = 'pending'", (r["id"],))
+        else:
+            claimed = ctx.db.execute(
+                "UPDATE reminders SET status = 'fired' WHERE id = ? AND status = 'pending'", (r["id"],))
+        if not claimed:
             continue
         channels = json.loads(r["notify_by"])
         text = f"Reminder: {r['message']}"

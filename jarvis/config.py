@@ -51,6 +51,14 @@ class Settings:
     elevenlabs_api_key: str = field(default_factory=lambda: _env("ELEVENLABS_API_KEY"))
     elevenlabs_voice_id: str = field(default_factory=lambda: _env("ELEVENLABS_VOICE_ID"))
     elevenlabs_model: str = field(default_factory=lambda: _env("ELEVENLABS_MODEL", "eleven_flash_v2_5"))
+    # Characters per month on your ElevenLabs plan (the free plan has 10,000), for the usage meter.
+    elevenlabs_monthly_chars: int = field(default_factory=lambda: int(_env("ELEVENLABS_MONTHLY_CHARS", "10000") or 0))
+
+    # Optional: your calendar's private iCal link(s), comma-separated (Google Calendar:
+    # Settings > your calendar > "Secret address in iCal format"). Read-only.
+    calendar_ics_url: str = field(default_factory=lambda: _env("CALENDAR_ICS_URL"))
+    # Optional: a Telegram bot (from @BotFather) so you can text Jarvis from your phone.
+    telegram_bot_token: str = field(default_factory=lambda: _env("TELEGRAM_BOT_TOKEN"))
 
     twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
     twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
@@ -82,6 +90,14 @@ class Settings:
     @property
     def tts_enabled(self) -> bool:
         return bool(self.elevenlabs_api_key and self.elevenlabs_voice_id)
+
+    @property
+    def calendar_urls(self) -> list[str]:
+        return [u.strip() for u in self.calendar_ics_url.split(",") if u.strip()]
+
+    @property
+    def telegram_enabled(self) -> bool:
+        return bool(self.telegram_bot_token)
 
     @property
     def is_local(self) -> bool:

@@ -60,6 +60,13 @@ def default_system_prompt(ctx: Context, tools: list[Tool], voice: bool = False) 
         abilities.append("phone and text the user, and call or text their contacts")
     if "run_command" in names:
         abilities.append("control the user's computer (open apps and websites, run commands, read files)")
+    if "calculate" in names:
+        abilities.append("do exact maths, convert currencies, tell the time anywhere, give prayer times")
+    if "read_webpage" in names:
+        abilities.append("open and read web pages and online PDFs")
+    if "get_calendar" in names and s.calendar_urls:
+        abilities.append("check their calendar")
+    abilities.append("read files they attach (PDFs, documents, pictures)")
     prompt = f"""You are JARVIS, the personal AI assistant of {s.my_name}. Address them as {s.my_name}.
 
 Personality: calm, capable, quietly witty, with the polished manner of a British butler
@@ -78,6 +85,12 @@ when a question might depend on something they told you before.
 
 Time: each message from {s.my_name} starts with the current local date and time in
 brackets. Their timezone is {s.timezone}. Use it to work out reminder times.
+
+Files: a message may include <attached_file> with the contents of a file the user shared.
+Answer from it directly; don't say you can't open files.
+
+Reminders can repeat (daily, weekdays, weekly, monthly): use set_reminder's repeat option for
+things like "every morning at 8".
 
 Approvals: calling or texting other people, running commands and writing files need
 {s.my_name}'s approval. Just call the tool; the app asks them to approve. Never try to
@@ -122,38 +135,78 @@ class Brain:
         self.web_search = web_search
         self.remember_facts = remember_facts
         self._lock = threading.Lock()
+        self._usage: dict[str, int] = {}
+        self._usage_lock = threading.Lock()
         self.messages: list[dict] = ctx.db.load_conversation(conversation_id)
         if ctx.vision is None:
             ctx.vision = self.describe_image  # lets the look_at_screen tool use the AI's eyes
 
     # --- public API -------------------------------------------------------------
-    def chat(self, text: str, image: tuple[bytes, str] | None = None) -> Reply:
-        """Answer a message. ``image`` is an optional (bytes, mime type) screenshot."""
+    def chat(self, text: str, image: tuple[bytes, str] | None = None,
+             attachment: tuple[str, bytes, str] | None = None) -> Reply:
+        """Answer a message. ``image`` is an optional (bytes, mime type) screenshot;
+        ``attachment`` an optional (file name, bytes, mime type) file to read."""
         with self._lock:
-            if image:
-                # Look once and keep a short written note of what's on screen, instead of
-                # storing the picture in the conversation (smaller, cheaper, works for any model).
-                seen = self.describe_image(image[0], image[1], text)
-                text = f"{text}\n\n<my_screen_right_now>\n{seen}\n</my_screen_right_now>"
-            return self._chat(text)
+            try:
+                if image:
+                    # Look once and keep a short written note of what's on screen, instead of
+                    # storing the picture in the conversation (smaller, cheaper, works for any model).
+                    seen = self.describe_image(image[0], image[1], text)
+                    text = f"{text}\n\n<my_screen_right_now>\n{seen}\n</my_screen_right_now>"
+                if attachment:
+                    from jarvis import files
 
-    def describe_image(self, data: bytes, mime: str, question: str) -> str:
+                    name, data, mime = attachment
+                    content = files.read_file(name, data, mime, text, self._look)
+                    text = files.with_file(text, name, content)
+                return self._chat(text)
+            finally:
+                self._flush_usage()
+
+    def _look(self, data: bytes, mime: str, prompt: str) -> str:
+        return self.describe_image(data, mime, "", prompt=prompt)
+
+    def describe_image(self, data: bytes, mime: str, question: str, prompt: str | None = None) -> str:
+        """What the AI sees in a picture (or a PDF's pages)."""
         import base64
 
+        kind = "document" if mime == "application/pdf" else "image"
         params: dict[str, Any] = {
             "model": self.settings.model,
-            "max_tokens": 2000,
+            "max_tokens": 4000,
             "messages": [{"role": "user", "content": [
-                {"type": "image", "source": {"type": "base64", "media_type": mime,
-                                             "data": base64.b64encode(data).decode()}},
-                {"type": "text", "text": VISION_PROMPT.format(question=question[:500])},
+                {"type": kind, "source": {"type": "base64", "media_type": mime,
+                                          "data": base64.b64encode(data).decode()}},
+                {"type": "text", "text": prompt or VISION_PROMPT.format(question=question[:500])},
             ]}],
         }
         if self.settings.model.startswith(ADAPTIVE_MODELS):
             params["thinking"] = {"type": "adaptive"}
             params["output_config"] = {"effort": "low"}
         response = self._client().beta.messages.create(**params)
+        self._count_usage(response)
         return self._text_of(response.content)
+
+    # --- usage meter ---------------------------------------------------------------
+    def _count_usage(self, response: Any) -> None:
+        u = getattr(response, "usage", None)
+        tokens_in = sum(int(getattr(u, k, 0) or 0) for k in (
+            "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")) if u else 0
+        self._add_usage(1, tokens_in, int(getattr(u, "output_tokens", 0) or 0) if u else 0)
+
+    def _add_usage(self, calls: int, tokens_in: int, tokens_out: int) -> None:
+        with self._usage_lock:
+            self._usage["ai_calls"] = self._usage.get("ai_calls", 0) + calls
+            self._usage["ai_tokens_in"] = self._usage.get("ai_tokens_in", 0) + tokens_in
+            self._usage["ai_tokens_out"] = self._usage.get("ai_tokens_out", 0) + tokens_out
+
+    def _flush_usage(self) -> None:
+        with self._usage_lock:
+            pending, self._usage = self._usage, {}
+        if pending:
+            from jarvis import usage
+
+            usage.record(self.ctx, pending)
 
     def reset(self) -> None:
         with self._lock:
@@ -215,7 +268,9 @@ class Brain:
             # If the model declines, let the API retry on its recommended fallback model.
             params["betas"] = ["server-side-fallback-2026-07-01"]
             params["fallbacks"] = "default"
-        return self._client().beta.messages.create(**params)
+        response = self._client().beta.messages.create(**params)
+        self._count_usage(response)
+        return response
 
     def _chat(self, text: str) -> Reply:
         if len(self.messages) > MAX_HISTORY_MESSAGES:

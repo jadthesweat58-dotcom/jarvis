@@ -12,6 +12,7 @@
   const now = () => new Date();
   const iso = (d) => d.toISOString();
   const inMinutes = (m) => iso(new Date(Date.now() + m * 60000));
+  const DEMO_EVENT = inMinutes(120);
 
   function seed() {
     return {
@@ -282,7 +283,7 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
     "GET /api/status": () => ({
       name: "Commander", mode: "demo", model: "Claude (claude.ai)", phone: false, computer_control: false,
       two_way_calls: false, started_at: STARTED, ai_name: "Claude (demo)", ai_ready: sampleState !== "absent" && sampleState !== "declined", web_search: false,
-      home_city: "", timezone: tz,
+      home_city: "", timezone: tz, tts: "browser", calendar: false, telegram: { enabled: false, linked: false },
     }),
     "GET /api/dashboard": () => ({
       reminders: state.reminders.filter((r) => r.status === "pending")
@@ -291,10 +292,13 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
       todos: state.todos.filter((x) => !x.done).map(({ id, task, due }) => ({ id, task, due })),
       tasks: [...state.todos].sort((a, b) => a.done - b.done || PRI[a.priority] - PRI[b.priority] || b.id - a.id)
         .map(({ id, task, due, priority, done }) => ({ id, task, due, priority: priority || "med", done })),
-      timeline: state.reminders.filter((r) => r.status !== "cancelled" && new Date(r.due_at) >= startOfDay())
+      timeline: [...state.reminders.filter((r) => r.status !== "cancelled" && new Date(r.due_at) >= startOfDay())
+        .map((r) => ({ id: r.id, kind: "reminder", message: r.message, due_at: r.due_at, status: r.status })),
+                 // A sample calendar event (the full Jarvis reads your real calendar).
+                 { id: "event-demo", kind: "event", message: "Design review (sample calendar event)", location: "",
+                   due_at: DEMO_EVENT, status: new Date(DEMO_EVENT) < now() ? "fired" : "pending" }]
         .sort((a, b) => a.due_at.localeCompare(b.due_at))
-        .map((r) => ({ id: r.id, message: r.message, due_at: r.due_at, status: r.status,
-                       time_local: new Date(r.due_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) })),
+        .map((r) => ({ ...r, time_local: new Date(r.due_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) })),
       actions: state.actions.filter((a) => a.status === "pending").map(({ id, summary }) => ({ id, summary })),
       facts: state.facts.length,
       counts: counts(),
@@ -331,13 +335,41 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
     "GET /api/weather": () => ({ available: false, label: "Full version", reason: "Weather needs the full Jarvis server." }),
     "POST /api/reset": () => { state.history = []; save(); return { ok: true }; },
     "POST /api/chat": async (body) => {
-      const text = String((body && body.text) || "").trim();
-      if (!text) return [400, { detail: "Say something first." }];
+      let text = String((body && body.text) || "").trim();
+      if (!text && !(body && body.file)) return [400, { detail: "Say something first." }];
+      if (body && body.file) {
+        // The preview reads text files itself; PDFs, Word files and pictures need the full server.
+        const m = String(body.file.data).match(/^data:([^;,]*)[^,]*;base64,(.*)$/);
+        const name = String(body.file.name || "file");
+        if (!m || !(/^text\//.test(m[1]) || /\.(txt|md|csv|json|log|py|js|html|xml)$/i.test(name))) {
+          return [400, { detail: "In this preview Jarvis reads text files only. PDFs, Word documents and pictures work in the full Jarvis." }];
+        }
+        const bytes = Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0));
+        const content = new TextDecoder().decode(bytes).slice(0, 20000);
+        text = `${text || "Please read this and give me a short summary of what matters."}\n\n<attached_file name="${name.replace(/["<>]/g, "")}">\n${content}\n</attached_file>`;
+      }
       const pending = [];
       const reply = await askClaude(text, pending);
+      countUsage(text, reply);
       return { reply, actions: pending };
     },
+    "GET /api/usage": () => {
+      const u = state.usage && state.usage.day === new Date().toDateString() ? state.usage : { calls: 0, tin: 0, tout: 0 };
+      const today = { ai_calls: u.calls, ai_tokens_in: u.tin, ai_tokens_out: u.tout, tts_chars: 0 };
+      return { today, month: today, tts_quota: 10000, tts_left: 10000 };
+    },
+    "GET /api/export": () => ({ exported_at: iso(now()), name: "Commander", facts: state.facts, notes: state.notes,
+                                todos: state.todos, reminders: state.reminders, contacts: state.contacts, phone_calls: state.calls }),
   };
+
+  function countUsage(sent, reply) {
+    const day = new Date().toDateString();
+    if (!state.usage || state.usage.day !== day) state.usage = { day, calls: 0, tin: 0, tout: 0 };
+    state.usage.calls += 1;  // rough token estimate: about 4 characters per token
+    state.usage.tin += Math.round((sent.length + 1500) / 4);
+    state.usage.tout += Math.round(String(reply || "").length / 4);
+    save();
+  }
 
   const lists = {
     facts: () => [...state.facts].reverse().map((f) => ({ id: f.id, title: f.fact, detail: f.category })),
@@ -398,6 +430,7 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
   };
 
   // Microphones are blocked inside the claude.ai page frame; say so plainly.
+  window.JARVIS_NO_PUSH = true;    // installing and push notifications need the real server
   window.JARVIS_NO_SCREEN = true;  // screen capture is blocked inside the claude.ai page frame
   window.JARVIS_NO_VOICE_MSG = "Voice input isn't available in this preview. Type instead; the full Jarvis listens in Chrome, Edge or Safari.";
   delete window.SpeechRecognition;

@@ -82,6 +82,10 @@ def settings(tmp_path):
         twilio_phone_number="",
         my_phone_number="",
         public_base_url="",
+        elevenlabs_api_key="",
+        elevenlabs_voice_id="",
+        calendar_ics_url="",
+        telegram_bot_token="",
     )
 
 

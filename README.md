@@ -6,7 +6,11 @@ Jarvis is your own AI assistant, powered by Google Gemini (or Claude, if you pre
 - 🧠 **Remember you**: facts, preferences, people and plans, kept between conversations
 - 📝 **Notes & to-dos**: save ideas and manage your task list
 - 🌐 **Web search & weather**: look things up online and check the forecast
-- ⏰ **Reminders & timers**: alerts on screen, spoken aloud, or by **phone call / text**
+- ⏰ **Reminders & timers**: one-off or repeating (daily, weekdays, weekly, monthly); alerts on
+  screen, spoken aloud, as a **phone notification**, on **Telegram**, or by **phone call / text**
+- 📎 **Read your files**: drop a PDF, Word document, picture or text file into the chat
+- 📅 **Your calendar** (optional): today's meetings in the timeline and the morning briefing
+- 🧮 **Handy extras**: exact maths, currency conversion, world clock, prayer times, reading web pages
 - 📞 **Phone calls**: Jarvis can call or text **you**, and call **other people** for you (it
   delivers a message, chats with them and reports back). You can also **phone Jarvis** and talk.
 - 💻 **Control your computer** (when running on your own machine): open apps and websites, run
@@ -101,13 +105,54 @@ Prefer the terminal? `python -m jarvis.cli` gives you a text chat.
   - "Remind me tomorrow at 9am to call the bank, and phone me for it."
   - "What's the weather this weekend?"
   - "Save Mom's number, +15551234567, and call her to say I'm running late."
-  - "Give me my executive briefing."
+  - "Give me my briefing."
+  - "Remind me every weekday at 8am to take my vitamins."
+  - "How much is 250 dollars in dirhams?" / "What time is it in Tokyo?"
+  - "Summarise this article: https://…"
   - (local mode) "Open Spotify" / "What's in my Downloads folder?"
+- **Attach a file**: click the 📎 next to the message box (or drag a file onto the chat box, or
+  paste a picture), then ask about it or just press **Send** for a summary. PDFs, Word
+  documents, pictures and text/code files up to 10 MB. Jarvis keeps only the text it reads.
+
+## Install Jarvis as an app + phone notifications
+
+- **iPhone**: open your Jarvis address in Safari → **Share** → **Add to Home Screen**. Open Jarvis
+  from the new icon, enter your access token once, then gear ⚙ → tick **Notifications on this
+  device** and allow. (iOS 16.4 or newer.)
+- **Android / Chrome / Edge**: gear ⚙ → **Install Jarvis as an app** (or the install icon in the
+  address bar), then tick **Notifications on this device**.
+- Reminders, the morning briefing and call reports then pop up even when Jarvis is closed.
+  **Send a test notification** checks it works. No account or key is needed for this.
+
+## Telegram (optional)
+
+Message Jarvis from Telegram, send it photos, documents and voice notes (voice needs Gemini),
+approve actions with buttons, and get reminders and your briefing there.
+1. In Telegram, open **@BotFather**, send `/newbot`, pick a name, and copy the token.
+2. Render → your service → **Environment** → add `TELEGRAM_BOT_TOKEN` (never paste it in a chat).
+3. In Jarvis: gear ⚙ → **Link Telegram** → **Open Telegram and press Start**. Only your chat is
+   ever answered; everyone else is ignored. Send `/new` to start a fresh conversation.
+
+## Your calendar (optional, read-only)
+
+Google Calendar → ⚙ Settings → click your calendar on the left → **Integrate calendar** → copy
+**Secret address in iCal format**. Put it in Render → **Environment** as `CALENDAR_ICS_URL`
+(several calendars: separate with commas). Today's events then show in the Mission Timeline (◆),
+in the morning briefing, and Jarvis can answer "what's on my calendar this week?". Outlook and
+iCloud calendars work too with their published .ics link. Treat the link like a password.
+
+## Usage meter and backup
+
+The System Monitor panel shows today's AI calls and tokens and, with ElevenLabs, this month's
+voice characters against your plan's quota (`ELEVENLABS_MONTHLY_CHARS`, default 10,000). The bar
+turns amber at 80%. Gear ⚙ → **Download my data** saves everything Jarvis remembers (facts,
+notes, tasks, reminders, contacts, calls) as a JSON file.
 
 ## Daily briefing
 
 Every morning at **7:30** (your `TIMEZONE`), Jarvis puts together a short spoken briefing:
 - the weather in your `HOME_CITY`
+- today's calendar events (if you've connected a calendar)
 - today's reminders
 - your most important open tasks
 - the top 3 news headlines (UAE and your city, plus one world story)
@@ -184,6 +229,8 @@ See `.env.example` for all of them. The main ones:
 | `JARVIS_EFFORT` | `low` (fastest/cheapest) · `medium` (default) · `high` (smartest) |
 | `JARVIS_ACCESS_TOKEN` | Password for the web app. **Required in the cloud.** |
 | `JARVIS_FILES_ROOT` | The only folder Jarvis may read/write in local mode (default: your home folder) |
+| `CALENDAR_ICS_URL` | Your calendar's secret iCal link(s), comma-separated (optional) |
+| `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather, to chat with Jarvis on Telegram (optional) |
 
 ## Safety notes
 
@@ -196,6 +243,10 @@ See `.env.example` for all of them. The main ones:
   off limits.
 - Without an access token, Jarvis only answers requests from this computer's own browser
   (other websites can't talk to it).
+- When Jarvis reads a web page for you, it refuses addresses on private networks (including
+  after redirects), so a web page can't trick it into poking at the server's own network.
+- The Telegram bot only answers the one chat linked with a one-time code; Telegram's messages are
+  checked with a secret header. Approvals from Telegram need the same Approve tap.
 
 ## How it's built
 
@@ -205,7 +256,13 @@ jarvis/
   gemini_brain.py the same loop on Google Gemini
   server.py       FastAPI web server: dashboard API, live events, Twilio webhooks
   cli.py          terminal chat
-  tools/          memory, notes, web (weather), reminders, calls, computer
+  tools/          memory, notes, web (weather), reminders, calls, computer, extras
+  files.py        reading attached files (PDF, Word, pictures, text)
+  push.py         phone notifications (Web Push)
+  telegram.py     Telegram bot
+  agenda.py       calendar (iCal link)
+  usage.py        usage meter
+  safeurl.py      safe fetching of web pages
   phone.py        Twilio calls & texts
   scheduler.py    fires reminders
   db.py           storage: SQLite file (data/jarvis.db), or Supabase/Postgres or Turso online

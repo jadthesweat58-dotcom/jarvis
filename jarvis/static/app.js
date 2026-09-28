@@ -45,6 +45,7 @@
     stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+    clip: '<path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/>',
   };
   const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.grid}</svg>`;
   const iconEl = (name) => { const i = el("i"); i.dataset.icon = name; i.innerHTML = icon(name); return i; };
@@ -153,6 +154,7 @@
     live("");
     showApprovals(data.actions);
     refresh();
+    setTimeout(pollUsage, 4000);  // after the voice has been fetched too
     await speak(data.reply);
   }
 
@@ -199,6 +201,46 @@
   }
   $("screenBtn").onclick = toggleScreen;
 
+  // ------------------------------------------------------------------ attach a file
+  // PDFs, Word documents, pictures and text files: Jarvis reads them with your next message.
+  const MAX_FILE = 10 * 1024 * 1024;
+  let pendingFile = null;
+  function clearFile() {
+    pendingFile = null; $("fileChip").hidden = true; $("fileInput").value = "";
+    $("boxInput").placeholder = "Message Jarvis…";
+  }
+  function attachFile(f) {
+    if (!f) return;
+    if (f.size > MAX_FILE) { toast("That file is too large (10 MB max).", true); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      pendingFile = { name: f.name || "pasted-image.png", data: String(reader.result) };
+      $("fileName").textContent = pendingFile.name;
+      $("fileChip").hidden = false;
+      live("");
+      $("boxInput").placeholder = "Ask about the file, or just press Send…";
+      $("boxInput").focus();
+    };
+    reader.onerror = () => toast("Couldn't read that file.", true);
+    reader.readAsDataURL(f);
+  }
+  $("attachBtn").onclick = () => $("fileInput").click();
+  $("fileInput").onchange = () => attachFile($("fileInput").files[0]);
+  $("fileClear").onclick = clearFile;
+  const chatbox = document.querySelector(".chatbox");
+  chatbox.addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); chatbox.classList.add("dragging"); } });
+  chatbox.addEventListener("dragleave", (e) => { if (!chatbox.contains(e.relatedTarget)) chatbox.classList.remove("dragging"); });
+  chatbox.addEventListener("drop", (e) => {
+    chatbox.classList.remove("dragging");
+    if (!e.dataTransfer.files.length) return;
+    e.preventDefault();
+    attachFile(e.dataTransfer.files[0]);
+  });
+  $("boxInput").addEventListener("paste", (e) => {
+    const f = [...(e.clipboardData ? e.clipboardData.files : [])][0];
+    if (f) { e.preventDefault(); attachFile(f); }
+  });
+
   // ------------------------------------------------------------------ daily briefing
   async function playBriefing() {
     const btn = $("briefBtn");
@@ -220,13 +262,17 @@
 
   async function send(text) {
     text = (text || "").trim();
-    if (!text) return;
+    const file = pendingFile;
+    if (!text && !file) return;
     const image = screenSnapshot();
-    addMsg("user", image ? `${text}  🖥` : text);
+    const body = { text };
+    if (image) body.image = image;
+    if (file) { body.file = { name: file.name, data: file.data }; clearFile(); }
+    addMsg("user", `${text || "Summarize this for me."}${file ? `  📎 ${file.name}` : ""}${image ? "  🖥" : ""}`);
     busy = true;
-    setMode("thinking", image ? "Jarvis is looking at your screen…" : "Jarvis is thinking…");
+    setMode("thinking", file ? `Jarvis is reading ${file.name}…` : image ? "Jarvis is looking at your screen…" : "Jarvis is thinking…");
     try {
-      await handleReply(await api("/api/chat", image ? { text, image } : { text }), text);
+      await handleReply(await api("/api/chat", body), text);
     } catch (e) {
       if (e.message !== "locked") { addMsg("system", e.message); toast(e.message, true); live(""); }
     } finally {
@@ -335,6 +381,95 @@
     refresh();
   };
   $("lockBtn").onclick = () => { store.del("jarvis-token"); token = ""; location.reload(); };
+  $("exportBtn").onclick = async () => {
+    try {
+      const res = await fetch("/api/export", { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const name = (res.headers.get("content-disposition") || "").match(/filename="([^"]+)"/);
+      const a = el("a");
+      a.href = URL.createObjectURL(await res.blob());
+      a.download = name ? name[1] : "jarvis-memory.json";
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { toast(`Couldn't download your data: ${e.message}`, true); }
+  };
+  $("telegramBtn").onclick = async () => {
+    const box = $("telegramBox");
+    try {
+      const { code, link } = await api("/api/telegram/link", {});
+      box.innerHTML = "";
+      const a = el("a", "", "Open Telegram and press Start");
+      a.href = link; a.target = "_blank"; a.rel = "noopener";
+      box.append(a, el("br"), document.createTextNode("or send the bot: "), el("code", "", `/start ${code}`),
+                 el("br"), document.createTextNode("The code works once, for 15 minutes."));
+      box.hidden = false;
+    } catch (e) { toast(e.message, true); }
+  };
+
+  // ------------------------------------------------------------------ install + phone notifications
+  // Installing Jarvis (Add to Home Screen) makes it an app; Web Push then delivers
+  // reminders and briefings even when Jarvis is closed.
+  let swReg = null, pushOn = false, installPrompt = null;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const standalone = window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  const pushSupported = () => !!(swReg && "PushManager" in window && "Notification" in window);
+  window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); installPrompt = e; $("installBtn").hidden = false; });
+  $("installBtn").onclick = async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => {});
+    installPrompt = null; $("installBtn").hidden = true;
+  };
+  const b64ToBytes = (b64) => {
+    const raw = atob((b64 + "=".repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+  };
+  function setPushUI(on, note) {
+    pushOn = on;
+    $("pushToggle").checked = on;
+    $("pushTest").hidden = !on;
+    $("pushNote").textContent = note || "";
+    $("pushNote").hidden = !note;
+  }
+  async function setupPush() {
+    if (window.JARVIS_NO_PUSH || !("serviceWorker" in navigator)) { $("pushRow").hidden = true; return; }
+    try { swReg = await navigator.serviceWorker.register("/sw.js"); } catch { $("pushRow").hidden = true; return; }
+    if (!pushSupported()) {
+      $("pushToggle").disabled = true;
+      setPushUI(false, isIOS && !standalone
+        ? "On iPhone: tap Share, then Add to Home Screen, and open Jarvis from there to turn notifications on."
+        : "This browser can't receive notifications.");
+      return;
+    }
+    const sub = await swReg.pushManager.getSubscription().catch(() => null);
+    const on = !!sub && Notification.permission === "granted";
+    setPushUI(on);
+    if (on) api("/api/push/subscribe", sub.toJSON()).catch(() => {});  // make sure the server still has it
+  }
+  $("pushToggle").onchange = async () => {
+    const want = $("pushToggle").checked;
+    try {
+      if (want) {
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") { setPushUI(false, "Notifications are blocked. Allow them for this site in your browser settings."); return; }
+        const { key } = await api("/api/push/key");
+        let sub = await swReg.pushManager.getSubscription();
+        if (!sub) sub = await swReg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
+        await api("/api/push/subscribe", sub.toJSON());
+        setPushUI(true);
+        toast("Notifications on: reminders and briefings will reach this device even when Jarvis is closed.");
+      } else {
+        const sub = await swReg.pushManager.getSubscription();
+        if (sub) { await api("/api/push/unsubscribe", { endpoint: sub.endpoint }).catch(() => {}); await sub.unsubscribe(); }
+        setPushUI(false);
+      }
+    } catch (e) {
+      setPushUI(false, `Couldn't turn notifications on: ${e.message}`);
+    }
+  };
+  $("pushTest").onclick = async () => {
+    try { await api("/api/push/test", {}); toast("Test sent. It should pop up in a moment."); } catch (e) { toast(e.message, true); }
+  };
 
   // ------------------------------------------------------------------ voice out
   let voice = null;
@@ -550,16 +685,18 @@
       ol.appendChild(el("li", "empty", 'Nothing scheduled today. Try "Remind me at 6pm to call Mom."'));
       return;
     }
-    // Show up to five: the last finished one, then what's next.
-    const nextIdx = items.findIndex((r) => r.status === "pending");
+    // Show up to five: the last finished one, then what's next. Calendar events
+    // (diamonds) sit alongside reminders; all-day events never count as "next".
+    const nextIdx = items.findIndex((r) => r.status === "pending" && !r.all_day);
     const start = Math.max(0, Math.min((nextIdx < 0 ? items.length : nextIdx) - 1, items.length - 5));
     items.slice(start, start + 5).forEach((r) => {
+      const isEvent = r.kind === "event";
       const isDone = r.status !== "pending";
       const isNow = !isDone && r === items[nextIdx];
-      const li = el("li", isDone ? "done" : isNow ? "now" : "");
-      li.append(el("div", "tl-when", `${r.time_local} · ${isDone ? "Done" : isNow ? inTime(r.due_at) : "Queued"}`),
-                el("div", "tl-what", r.message));
-      li.title = r.message;
+      const li = el("li", `${isEvent ? "event " : ""}${isDone ? "done" : isNow ? "now" : ""}`.trim());
+      const state = isDone ? (isEvent ? "Ended" : "Done") : isNow ? inTime(r.due_at) : isEvent ? "Event" : "Queued";
+      li.append(el("div", "tl-when", `${r.time_local} · ${state}`), el("div", "tl-what", r.message));
+      li.title = r.location ? `${r.message} (${r.location})` : r.message;
       ol.appendChild(li);
     });
   }
@@ -632,6 +769,30 @@
     } catch { /* offline: the pill says so */ }
   }
 
+  const fmtK = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 1e4 ? 0 : 1)}k` : String(n || 0));
+  async function pollUsage() {
+    try {
+      const u = await api("/api/usage");
+      const t = u.today || {}, m = u.month || {};
+      const calls = t.ai_calls || 0;
+      $("usageAi").textContent = `${calls} call${calls === 1 ? "" : "s"} · ${fmtK((t.ai_tokens_in || 0) + (t.ai_tokens_out || 0))} tokens`;
+      const voiceRow = status.tts === "elevenlabs";
+      $("usageVoiceRow").hidden = !voiceRow;
+      $("usageBarWrap").hidden = !(voiceRow && u.tts_quota);
+      if (voiceRow) {
+        const used = m.tts_chars || 0;
+        $("usageVoice").textContent = u.tts_quota ? `${fmtK(used)} / ${fmtK(u.tts_quota)} chars` : `${fmtK(used)} chars`;
+        if (u.tts_quota) {
+          const pct = Math.min(100, (used / u.tts_quota) * 100);
+          $("usageBar").style.width = `${pct}%`;
+          $("usageBarWrap").classList.toggle("warn", pct >= 80 && pct < 95);
+          $("usageBarWrap").classList.toggle("bad", pct >= 95);
+        }
+      }
+      $("usage").hidden = false;
+    } catch { /* not important */ }
+  }
+
   // ------------------------------------------------------------------ header + stats
   function renderStats() {
     const c = (dash && dash.counts) || {};
@@ -684,7 +845,7 @@
         addMsg("system", `🔔 ${ev.message}`);
         toast(`🔔 ${ev.message}`);
       }
-      if ("Notification" in window && Notification.permission === "granted" && document.hidden) new Notification("Jarvis", { body: ev.message });
+      if (!pushOn && "Notification" in window && Notification.permission === "granted" && document.hidden) new Notification("Jarvis", { body: ev.message });
       if (!busy) speak(ev.message);
       refresh();
     };
@@ -796,15 +957,21 @@
       $("opName").textContent = status.name || "Operator";
       $("opSub").textContent = status.mode === "demo" ? "Demo · in this page" : `${status.ai_name || "AI"} · ${status.mode} mode`;
       $("monitorWhere").textContent = status.mode === "demo" ? "Simulated" : status.computer_control ? "This computer" : "Server";
+      const tg = status.telegram || {};
+      $("telegramBtn").hidden = !tg.enabled;
+      $("telegramBtn").textContent = tg.linked ? "Telegram linked ✓ (link again)" : "Link Telegram";
       if (!chatLog.children.length) {
         const hello = `Good to see you, ${status.name}. How can I help?`;
         addMsg("jarvis", hello);
       }
       await refresh();
       pollSystem();
+      pollUsage();
       listenForEvents();
       if (!timers) {
         timers = true;
+        setupPush();
+        setInterval(pollUsage, 60000);
         setInterval(refresh, 20000);
         setInterval(pollSystem, 3000);
         setInterval(renderStats, 30000);

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import threading
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import httpx
 
@@ -24,8 +24,10 @@ class VoiceError(Exception):
 
 
 class ElevenLabsVoice:
-    def __init__(self, settings: "Settings", client: Any = None):
+    def __init__(self, settings: "Settings", client: Any = None,
+                 on_usage: Callable[[int], None] | None = None):
         self.settings = settings
+        self.on_usage = on_usage  # told how many characters each (paid) request used
         self._http = client or httpx.Client(timeout=30)
         self._cache: OrderedDict[str, bytes] = OrderedDict()
         self._lock = threading.Lock()
@@ -52,6 +54,11 @@ class ElevenLabsVoice:
         if resp.status_code != 200:
             raise VoiceError(self._explain(resp))
         audio = resp.content
+        if self.on_usage:
+            try:
+                self.on_usage(len(text))
+            except Exception:
+                pass  # the meter must never stop Jarvis talking
         with self._lock:
             self._cache[text] = audio
             if len(self._cache) > CACHE_SIZE:
