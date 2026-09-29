@@ -351,8 +351,20 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
       const pending = [];
       const reply = await askClaude(text, pending);
       countUsage(text, reply);
-      return { reply, actions: pending };
+      return { reply, actions: pending, images: [] };
     },
+    // Sample ticker data: the full Jarvis shows live prices, headlines and scores.
+    "GET /api/hud": () => ({
+      markets: [
+        { symbol: "BTC", label: "BTC", price: 63120, change: 2.14 }, { symbol: "ETH", label: "ETH", price: 2410.1, change: -1.5 },
+        { symbol: "GOLD", label: "Gold", price: 2665.3, change: 0.57 }, { symbol: "SPX", label: "S&P 500", price: 5829, change: 0.5 },
+      ],
+      football: [{ league: "Premier League", home: "Arsenal", away: "Chelsea", home_score: "2", away_score: "1", state: "post", detail: "FT", kickoff: iso(now()) }],
+      news: [{ title: "Sample headline: live news appears here in the full Jarvis", source: "Demo", link: "https://news.google.com/" }],
+      settings: { tickers: ["BTC", "ETH", "GOLD", "SPX"], leagues: ["eng.1"], news: true },
+    }),
+    "POST /api/hud": (body) => ({ tickers: body.tickers || [], leagues: body.leagues || [], news: !!body.news }),
+    "GET /api/automations": () => ({ routines: [], watchers: [] }),
     "GET /api/usage": () => {
       const u = state.usage && state.usage.day === new Date().toDateString() ? state.usage : { calls: 0, tin: 0, tout: 0 };
       const today = { ai_calls: u.calls, ai_tokens_in: u.tin, ai_tokens_out: u.tout, tts_chars: 0 };
@@ -379,6 +391,7 @@ app shows Approve / Deny buttons. Don't ask for confirmation in text as well.`;
     contacts: () => state.contacts.map((c) => ({ id: c.id, title: c.name, detail: `${c.phone} ${c.relationship}` })),
     calls: () => [...state.calls].reverse().map((c) => ({ id: c.id, title: c.name, detail: `${c.kind} · simulated · ${localTime(new Date(c.at))}` })),
     tools: () => makeTools([]).map((t, i) => ({ id: i, title: t.name, detail: t.description })),
+    library: () => [],
   };
 
   async function resolveAction(id, approve) {

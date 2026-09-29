@@ -135,7 +135,7 @@ def test_brain_records_tokens(ctx):
     reply.usage = SimpleNamespace(input_tokens=1200, output_tokens=80, cache_read_input_tokens=300)
     Brain(ctx, client=FakeClaude(reply)).chat("hello")
     today = usage.summary(ctx)["today"]
-    assert today == {"ai_calls": 1, "ai_tokens_in": 1500, "ai_tokens_out": 80, "tts_chars": 0}
+    assert today == {"ai_calls": 1, "ai_tokens_in": 1500, "ai_tokens_out": 80, "tts_chars": 0, "images": 0}
 
 
 def test_voice_characters_count_towards_quota(ctx):

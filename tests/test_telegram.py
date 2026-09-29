@@ -28,9 +28,9 @@ class FakeTelegramAPI:
     def __init__(self):
         self.calls = []
 
-    def post(self, url, json):
+    def post(self, url, json=None, data=None, files=None):
         method = url.rsplit("/", 1)[-1]
-        self.calls.append((method, json))
+        self.calls.append((method, json if json is not None else {**(data or {}), "files": files}))
         results = {"getMe": {"username": "jad_jarvis_bot"}, "getFile": {"file_path": "docs/f.txt", "file_size": 20},
                    "getWebhookInfo": {"url": ""}}
         return FakeResponse({"ok": True, "result": results.get(method, True)})
@@ -187,3 +187,16 @@ def test_link_endpoint(ctx, monkeypatch):
     out = client.post("/api/telegram/link").json()
     assert out["link"] == f"https://t.me/jad_jarvis_bot?start={out['code']}" and len(out["code"]) >= 20
     assert client.get("/api/status").json()["telegram"]["enabled"] is True
+
+
+def test_pictures_are_sent_as_photos(ctx, api, monkeypatch):
+    from jarvis import google_ai
+
+    ctx.settings.gemini_api_key = "k"
+    monkeypatch.setattr(google_ai, "generate_image", lambda s, prompt, source=None: (b"PNGDATA", "image/png", ""))
+    bot, _ = make_bot(ctx, api, response(tool_use("generate_image", {"prompt": "a falcon"})), response(text("Here it is.")))
+    ctx.db.set_kv("telegram_chat_id", str(OWNER))
+    bot.handle(msg(OWNER, "draw a falcon", 1))
+    photos = [p for m, p in api.calls if m == "sendPhoto"]
+    assert api.sent() == ["Here it is."] and len(photos) == 1
+    assert photos[0]["chat_id"] == str(OWNER) and photos[0]["files"]["photo"][1] == b"PNGDATA"

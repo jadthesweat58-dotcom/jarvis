@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
-from jarvis import agenda, briefing, push, usage
+from jarvis import agenda, automations, briefing, hud, images, library, push, usage
 from jarvis.app import build_context
 from jarvis.brain import Brain, create_brain, resolve_action
 from jarvis.db import utcnow
@@ -97,6 +97,16 @@ def decode_file(data_url: str) -> tuple[bytes, str]:
     return data, match.group(1) or ""
 
 
+class HudIn(BaseModel):
+    tickers: list[str] | None = None
+    leagues: list[str] | None = None
+    news: bool | None = None
+
+
+class AutomationIn(BaseModel):
+    action: str  # run | pause | resume | delete
+
+
 class PushSubIn(BaseModel):
     endpoint: str
     keys: dict[str, str] = {}
@@ -157,11 +167,30 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        def morning_briefing() -> None:
-            # Composing takes a few seconds (AI + web search): don't hold up reminders.
-            threading.Thread(target=briefing.send_if_due, args=(ctx, make_brain), daemon=True).start()
+        busy: dict[str, threading.Lock] = {k: threading.Lock() for k in ("briefing", "routines", "watchers")}
 
-        loop = ReminderLoop(ctx, on_tick=morning_briefing)
+        def once(name: str, job: Callable[[], Any]) -> None:
+            """Run a scheduled job in the background, never two copies at the same time."""
+            if not busy[name].acquire(blocking=False):
+                return
+
+            def run() -> None:
+                try:
+                    job()
+                except Exception:
+                    log.exception("Scheduled %s failed", name)
+                finally:
+                    busy[name].release()
+
+            threading.Thread(target=run, name=name, daemon=True).start()
+
+        def every_minute() -> None:
+            # These take a few seconds each (AI, web pages): don't hold up reminders.
+            once("briefing", lambda: briefing.send_if_due(ctx, make_brain))
+            once("routines", lambda: automations.run_due_routines(ctx, make_brain))
+            once("watchers", lambda: automations.run_due_watchers(ctx, make_brain))
+
+        loop = ReminderLoop(ctx, on_tick=every_minute)
         loop.start()
         threading.Thread(target=telegram.start, name="telegram-setup", daemon=True).start()
         if not ctx.settings.access_token:
@@ -233,6 +262,7 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             extra["image"] = image
         if attachment:
             extra["attachment"] = attachment
+        before = images.latest_id(ctx)
         try:
             reply = brain.chat(text, **extra)
         except HTTPException:
@@ -242,7 +272,7 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
         except Exception as exc:
             log.exception("Chat failed")
             raise HTTPException(500, f"Jarvis hit a problem: {exc}") from exc
-        return {"reply": reply.text, "actions": reply.actions}
+        return {"reply": reply.text, "actions": reply.actions, "images": images.made_since(ctx, before)}
 
     # --- browser app -------------------------------------------------------------
     @app.get("/healthz")
@@ -272,7 +302,8 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
                 "ai_name": s.provider_name, "ai_ready": bool(s.ai_key), "web_search": bool(s.ai_key),
                 "home_city": s.home_city, "timezone": s.timezone, "started_at": started_at,
                 "tts": "elevenlabs" if voice.enabled else "browser", "calendar": bool(s.calendar_urls),
-                "telegram": {"enabled": s.telegram_enabled, "linked": telegram.owner_chat is not None}}
+                "telegram": {"enabled": s.telegram_enabled, "linked": telegram.owner_chat is not None},
+                "pictures": bool(s.gemini_api_key)}
 
     @app.post("/api/chat", dependencies=[Depends(require_user)])
     def chat(body: ChatIn) -> dict[str, Any]:
@@ -325,7 +356,9 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             "(SELECT COUNT(*) FROM todos WHERE done = 0) AS todos, "
             "(SELECT COUNT(*) FROM todos WHERE done = 1) AS todos_done, "
             "(SELECT COUNT(*) FROM reminders WHERE status = 'pending') AS reminders, "
-            "(SELECT COUNT(*) FROM contacts) AS contacts, (SELECT COUNT(*) FROM phone_calls) AS calls")
+            "(SELECT COUNT(*) FROM contacts) AS contacts, (SELECT COUNT(*) FROM phone_calls) AS calls, "
+            "(SELECT COUNT(*) FROM documents) AS library, "
+            "(SELECT COUNT(*) FROM routines WHERE enabled = 1) + (SELECT COUNT(*) FROM watchers WHERE status = 'active') AS automations")
         counts = {k: int(v or 0) for k, v in counts.items()}
         turns, tool_calls = conversation_stats(main_brain.messages)
         counts.update(turns=turns, tool_calls=tool_calls, tools=len(main_brain.tools) + (
@@ -396,6 +429,66 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     def system() -> dict[str, float]:
         return system_stats()
 
+    # --- HUD ----------------------------------------------------------------------------
+    @app.get("/api/hud", dependencies=[Depends(require_user)])
+    def get_hud() -> dict[str, Any]:
+        return hud.data(ctx)
+
+    @app.post("/api/hud", dependencies=[Depends(require_user)])
+    def set_hud(body: HudIn) -> dict[str, Any]:
+        values = {k: v for k, v in body.model_dump().items() if v is not None}
+        return hud.save_settings(ctx, values)
+
+    # --- pictures -----------------------------------------------------------------------
+    @app.get("/api/images/{image_id}", dependencies=[Depends(require_user)])
+    def get_image(image_id: int) -> Response:
+        found = images.get(ctx, image_id)
+        if not found:
+            raise HTTPException(404, "No such picture (only the newest 40 are kept).")
+        return Response(found[0], media_type=found[1], headers={"Cache-Control": "private, max-age=86400"})
+
+    # --- library + automations ----------------------------------------------------------
+    @app.post("/api/library/{doc_id}/delete", dependencies=[Depends(require_user)])
+    def delete_document(doc_id: int) -> dict[str, bool]:
+        if not library.forget(ctx, doc_id):
+            raise HTTPException(404, "No such document.")
+        return {"ok": True}
+
+    @app.get("/api/automations", dependencies=[Depends(require_user)])
+    def list_automations() -> dict[str, Any]:
+        local = lambda iso: datetime.fromisoformat(iso).astimezone(ctx.settings.tz).strftime("%a %d %b %H:%M") if iso else ""  # noqa: E731
+        routines = ctx.db.query("SELECT id, title, prompt, rule, next_run, last_run, last_result, enabled FROM routines ORDER BY id")
+        for r in routines:
+            r["schedule"] = describe_repeat(r["rule"]) + f" at {r['rule'].partition('@')[2]}" if "@" in r["rule"] else describe_repeat(r["rule"])
+            r["next_local"], r["last_local"] = local(r["next_run"]), local(r["last_run"])
+        watchers = ctx.db.query("SELECT id, url, condition, every_hours, status, last_note, last_checked, next_check "
+                                "FROM watchers ORDER BY id")
+        for w in watchers:
+            w["last_local"] = local(w["last_checked"])
+        return {"routines": routines, "watchers": watchers}
+
+    @app.post("/api/automations/{kind}/{item_id}", dependencies=[Depends(require_user)])
+    def change_automation(kind: str, item_id: int, body: AutomationIn) -> dict[str, bool]:
+        from jarvis.tools.automations import queue_now
+
+        table = {"routine": "routines", "watcher": "watchers"}.get(kind)
+        if not table:
+            raise HTTPException(404, "Unknown automation.")
+        if body.action == "run":
+            changed = queue_now(ctx, kind, item_id)
+        elif body.action == "delete":
+            changed = ctx.db.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
+        elif body.action in ("pause", "resume") and kind == "routine":
+            changed = ctx.db.execute("UPDATE routines SET enabled = ? WHERE id = ?", (int(body.action == "resume"), item_id))
+        elif body.action in ("pause", "resume"):
+            changed = ctx.db.execute("UPDATE watchers SET status = ?, fails = 0 WHERE id = ?",
+                                     ("active" if body.action == "resume" else "paused", item_id))
+        else:
+            raise HTTPException(400, "Unknown action.")
+        if not changed:
+            raise HTTPException(404, f"No such {kind}.")
+        return {"ok": True}
+
     @app.get("/api/usage", dependencies=[Depends(require_user)])
     def get_usage() -> dict[str, Any]:
         return usage.summary(ctx)
@@ -404,8 +497,11 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     def export() -> Response:
         """Everything Jarvis remembers about you, as a JSON file (no keys or secrets)."""
         data = {"exported_at": utcnow(), "name": ctx.settings.my_name}
-        for table in ("facts", "notes", "todos", "reminders", "contacts", "phone_calls"):
+        for table in ("facts", "notes", "todos", "reminders", "contacts", "phone_calls", "routines"):
             data[table] = ctx.db.query(f"SELECT * FROM {table} ORDER BY id")
+        data["watchers"] = ctx.db.query(
+            "SELECT id, url, condition, every_hours, status, last_note, created_at FROM watchers ORDER BY id")
+        data["library"] = library.documents(ctx)
         stamp = datetime.now(ctx.settings.tz).strftime("%Y-%m-%d")
         return Response(json.dumps(data, indent=2, default=str), media_type="application/json",
                         headers={"Content-Disposition": f'attachment; filename="jarvis-memory-{stamp}.json"',
@@ -511,6 +607,7 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             "reminders": "SELECT id, message AS title, due_at AS detail, status, repeat_rule FROM reminders ORDER BY due_at DESC LIMIT 100",
             "contacts": "SELECT id, name AS title, phone || ' ' || relationship AS detail FROM contacts ORDER BY name",
             "calls": "SELECT id, contact_name AS title, direction || ' · ' || status || ' · ' || created_at AS detail FROM phone_calls ORDER BY id DESC LIMIT 50",
+            "library": "SELECT id, name AS title, summary AS detail, chars, created_at FROM documents ORDER BY id DESC LIMIT 200",
         }
         if kind == "tools":
             tools = [{"id": i, "title": t.name, "detail": t.description} for i, t in enumerate(available_tools(ctx.settings))]

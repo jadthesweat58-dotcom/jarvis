@@ -287,9 +287,17 @@ MAX_PAGE_CHARS = 20_000
     ["url"],
 )
 def read_webpage(ctx: Context, args: dict) -> str:
+    final, title, text = fetch_page(str(args.get("url", "")))
+    if len(text) > MAX_PAGE_CHARS:
+        text = text[:MAX_PAGE_CHARS] + "\n[… page cut here]"
+    return f"{title or final}\n{final}\n\n{text or '(no readable text on that page)'}"
+
+
+def fetch_page(url: str) -> tuple[str, str, str]:
+    """(final address, title, readable text) of a public web page or online PDF."""
     from jarvis import safeurl
 
-    url = str(args.get("url", "")).strip()
+    url = url.strip()
     if url and "://" not in url:
         url = "https://" + url
     try:
@@ -297,7 +305,7 @@ def read_webpage(ctx: Context, args: dict) -> str:
     except safeurl.UnsafeURL as exc:
         raise ToolError(str(exc)) from exc
     except httpx.HTTPError as exc:
-        raise ToolError(f"Couldn't open that page: {exc}") from exc
+        raise ToolError(f"Couldn't open that page ({type(exc).__name__}).") from exc
     ctype = ctype.split(";")[0].strip().lower()
     if ctype == "application/pdf" or final.lower().endswith(".pdf"):
         from jarvis import files
@@ -306,16 +314,13 @@ def read_webpage(ctx: Context, args: dict) -> str:
             text, pages = files.pdf_text(body)
         except files.FileError as exc:
             raise ToolError(str(exc)) from exc
-        title = f"PDF, {pages} pages"
-    elif ctype.startswith("text/html") or ctype in ("application/xhtml+xml", ""):
+        return final, f"PDF, {pages} pages", text
+    if ctype.startswith("text/html") or ctype in ("application/xhtml+xml", ""):
         title, text = html_to_text(body.decode("utf-8", "replace"))
-    elif ctype.startswith("text/") or ctype in ("application/json", "application/xml"):
-        title, text = "", body.decode("utf-8", "replace")
-    else:
-        raise ToolError(f"That link is a {ctype} file, which I can't read as text.")
-    if len(text) > MAX_PAGE_CHARS:
-        text = text[:MAX_PAGE_CHARS] + "\n[… page cut here]"
-    return f"{title or final}\n{final}\n\n{text or '(no readable text on that page)'}"
+        return final, title, text
+    if ctype.startswith("text/") or ctype in ("application/json", "application/xml"):
+        return final, "", body.decode("utf-8", "replace")
+    raise ToolError(f"That link is a {ctype} file, which I can't read as text.")
 
 
 # ---------------------------------------------------------------- calendar
@@ -336,3 +341,57 @@ def get_calendar(ctx: Context, args: dict) -> str:
     if not events:
         return f"Nothing on the calendar for the next {days} day{'s' if days != 1 else ''}."
     return "\n".join(agenda.describe(e) for e in events)
+
+
+# ---------------------------------------------------------------- markets + HUD
+@tool(
+    "market_quote",
+    "Live price of crypto (BTC, ETH, SOL…), stocks (TSLA, AAPL, NVDA…), indices (SPX, NASDAQ, DOW), "
+    "gold, silver or oil. Prices are in US dollars; convert with convert_currency if asked.",
+    {"symbols": {"type": "array", "items": {"type": "string"}, "description": "e.g. [\"BTC\", \"TSLA\", \"GOLD\"]"}},
+    ["symbols"],
+)
+def market_quote(ctx: Context, args: dict) -> str:
+    from jarvis import hud
+
+    symbols = [str(s).strip().upper().lstrip("^$") for s in (args.get("symbols") or []) if str(s).strip()][:10]
+    if not symbols:
+        raise ToolError("Which symbols?")
+    found = hud.quotes(symbols)
+    if not found:
+        raise ToolError("I couldn't get those prices right now.")
+    missing = [s for s in symbols if s not in {q["symbol"] for q in found}]
+    lines = [f"{q['label']}: ${q['price']:,.2f} ({q['change']:+.2f}% today)" for q in found]
+    return "\n".join(lines) + (f"\nNo price found for: {', '.join(missing)}" if missing else "")
+
+
+@tool(
+    "set_hud",
+    "Change the live ticker strip on the dashboard: which prices it shows (crypto, stocks, GOLD, SPX, "
+    "OIL…), which football leagues (eng.1 Premier League, esp.1 LaLiga, ita.1, ger.1, fra.1, "
+    "uefa.champions, ksa.1 Saudi Pro League), and whether headlines show.",
+    {
+        "add_tickers": {"type": "array", "items": {"type": "string"}},
+        "remove_tickers": {"type": "array", "items": {"type": "string"}},
+        "leagues": {"type": "array", "items": {"type": "string"}, "description": "Replaces the list; [] for none."},
+        "news": {"type": "boolean"},
+    },
+)
+def set_hud(ctx: Context, args: dict) -> str:
+    from jarvis import hud
+
+    current = hud.settings(ctx)
+    drop = {str(t).upper().lstrip("^$") for t in args.get("remove_tickers") or []}
+    tickers = [t for t in current["tickers"] if t not in drop] + [str(t) for t in args.get("add_tickers") or []]
+    values: dict = {"tickers": tickers}
+    if args.get("leagues") is not None:
+        unknown = [l for l in args["leagues"] if l not in hud.LEAGUES]
+        if unknown:
+            raise ToolError(f"Unknown league codes: {', '.join(unknown)}. Use: {', '.join(hud.LEAGUES)}.")
+        values["leagues"] = args["leagues"]
+    if args.get("news") is not None:
+        values["news"] = args["news"]
+    saved = hud.save_settings(ctx, values)
+    leagues = ", ".join(hud.LEAGUES[l] for l in saved["leagues"]) or "none"
+    return (f"HUD updated. Tickers: {', '.join(saved['tickers']) or 'none'}. Football: {leagues}. "
+            f"Headlines: {'on' if saved['news'] else 'off'}.")

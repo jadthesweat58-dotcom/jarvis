@@ -11,6 +11,11 @@ Jarvis is your own AI assistant, powered by Google Gemini (or Claude, if you pre
 - 📎 **Read your files**: drop a PDF, Word document, picture or text file into the chat
 - 📅 **Your calendar** (optional): today's meetings in the timeline and the morning briefing
 - 🧮 **Handy extras**: exact maths, currency conversion, world clock, prayer times, reading web pages
+- 🔁 **Routines**: jobs Jarvis does by itself on a schedule and sends you the result
+- 🔎 **Watchers**: "tell me when this drops below 500 AED" or "when this page changes"
+- 📈 **Live ticker**: prices, football scores and headlines across the dashboard
+- 📚 **Second brain**: every file you share is saved to a searchable library
+- 🎨 **Pictures**: "make me a poster of…", "turn this photo into a cartoon"
 - 📞 **Phone calls**: Jarvis can call or text **you**, and call **other people** for you (it
   delivers a message, chats with them and reports back). You can also **phone Jarvis** and talk.
 - 💻 **Control your computer** (when running on your own machine): open apps and websites, run
@@ -141,6 +146,34 @@ Google Calendar → ⚙ Settings → click your calendar on the left → **Integ
 in the morning briefing, and Jarvis can answer "what's on my calendar this week?". Outlook and
 iCloud calendars work too with their published .ics link. Treat the link like a password.
 
+## Routines and watchers
+
+- **Routines** are jobs Jarvis does on its own and sends you: *"Every Friday at 6pm, find fun
+  things to do in Dubai this weekend"*, *"Every weekday at 7:45, give me the top tech news"*.
+  They can search the web, read pages, check the weather and your library, but can never call,
+  text, run commands or do anything that needs your approval.
+- **Watchers** check a web page every few hours: *"Watch this page and tell me when it's under 500
+  AED: https://…"* or *"Tell me when this page changes"*. Jarvis ignores trivial changes (dates,
+  counters). Some shops block automatic checks; after 3 failures Jarvis tells you and pauses.
+- Results arrive in the chat box, as a phone notification and on Telegram. See, run, pause or
+  delete them under **Automations** in the sidebar. Up to 20 of each. Each run uses a little
+  Gemini, so keep an eye on the usage meter.
+- They run while the server is awake, so keep the UptimeRobot monitor on.
+
+## Live ticker, library and pictures
+
+- **Live ticker** (under the clock): crypto and stock prices, gold, football scores and UAE
+  headlines, all from free sources. Change it with ⚙ → **Customize the live ticker**, or just say
+  *"add Tesla and Solana to my ticker"* / *"show LaLiga scores"*. Ask *"what's Bitcoin at?"* any time.
+- **Library** (sidebar): every file you attach is saved as text so you can ask later: *"what did
+  the lease say about the notice period?"*. *"Save this article to my library: https://…"* works
+  too. Remove documents from the Library view. Search understands meaning (with the Gemini key)
+  and falls back to keywords.
+- **Pictures**: *"Make me a poster for my birthday party, neon style"*, then *"make it purple"*.
+  Send a photo and ask *"turn this into a cartoon"*. Pictures show in the chat (and on Telegram);
+  the newest 40 are kept. Uses Google's image model on your Gemini key and costs a few cents each
+  (`IMAGE_MODEL` can pick a specific model).
+
 ## Usage meter and backup
 
 The System Monitor panel shows today's AI calls and tokens and, with ElevenLabs, this month's
@@ -262,6 +295,11 @@ jarvis/
   telegram.py     Telegram bot
   agenda.py       calendar (iCal link)
   usage.py        usage meter
+  automations.py  routines and watchers (run by the scheduler)
+  hud.py          live ticker data (prices, headlines, football)
+  library.py      the searchable document library
+  images.py       pictures Jarvis makes
+  google_ai.py    Gemini embeddings and picture generation
   safeurl.py      safe fetching of web pages
   phone.py        Twilio calls & texts
   scheduler.py    fires reminders

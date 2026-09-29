@@ -76,6 +76,52 @@ CREATE TABLE IF NOT EXISTS usage_log (
     amount INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (day, kind)
 );
+CREATE TABLE IF NOT EXISTS routines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    prompt TEXT NOT NULL,              -- what Jarvis does each time, in plain words
+    rule TEXT NOT NULL,                -- repeat rule, as for reminders: daily@07:00, weekly@18:00, ...
+    next_run TEXT NOT NULL,            -- UTC ISO timestamp
+    last_run TEXT,
+    last_result TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS watchers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    url TEXT NOT NULL,
+    condition TEXT NOT NULL DEFAULT '', -- e.g. "price below 500 AED", or empty for any meaningful change
+    every_hours INTEGER NOT NULL DEFAULT 6,
+    snapshot TEXT NOT NULL DEFAULT '',  -- the page text last time
+    next_check TEXT NOT NULL,           -- UTC ISO timestamp
+    last_checked TEXT,
+    last_note TEXT NOT NULL DEFAULT '',
+    fails INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active',  -- active | done | paused
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS documents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT '',   -- "file", or the web address it came from
+    chars INTEGER NOT NULL DEFAULT 0,
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    doc_id INTEGER NOT NULL,
+    idx INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    embedding TEXT                     -- JSON list of floats, or NULL until embedded
+);
+CREATE TABLE IF NOT EXISTS images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    prompt TEXT NOT NULL,
+    mime TEXT NOT NULL,
+    data TEXT NOT NULL,                -- base64
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS phone_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     call_sid TEXT,

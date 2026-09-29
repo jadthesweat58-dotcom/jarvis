@@ -47,6 +47,7 @@ class Tool:
     prepare: Callable[[Context, dict], dict] | None = None
     local_only: bool = False
     needs_phone: bool = False
+    needs_gemini: bool = False   # uses Google services beyond chat (pictures)
 
     def definition(self) -> dict[str, Any]:
         return {
@@ -103,10 +104,14 @@ def available_tools(settings: "Settings") -> list[Tool]:
             continue
         if t.needs_phone and not settings.twilio_enabled:
             continue
+        if t.needs_gemini and not settings.gemini_api_key:
+            continue
         tools.append(t)
     return tools
 
 
 def load_all() -> None:
     # Importing the modules runs their @tool decorators.
-    from jarvis.tools import calls, computer, extras, memory, notes, reminders, web  # noqa: F401
+    from jarvis.tools import (  # noqa: F401
+        automations, calls, computer, extras, library, memory, notes, pictures, reminders, web,
+    )

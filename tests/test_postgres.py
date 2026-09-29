@@ -29,7 +29,8 @@ def pg_url(tmp_path_factory):
 def pg(pg_url):
     db = PostgresDatabase(pg_url)
     for table in ("facts", "notes", "todos", "reminders", "contacts", "conversations",
-                  "pending_actions", "phone_calls", "kv", "usage_log", "push_subscriptions"):
+                  "pending_actions", "phone_calls", "kv", "usage_log", "push_subscriptions",
+                  "routines", "watchers", "documents", "chunks", "images"):
         db.execute(f"DELETE FROM {table}")
     return db
 
@@ -122,3 +123,27 @@ def test_new_tables_on_postgres(pg, settings, monkeypatch):
     assert fire_due_reminders(ctx) == 1 and fire_due_reminders(ctx) == 0
     row = pg.one("SELECT status, due_at FROM reminders")
     assert row["status"] == "pending" and row["due_at"] > past
+
+
+def test_automations_library_and_pictures_on_postgres(pg, settings, monkeypatch):
+    from jarvis import automations, images, library
+
+    ctx = build_context(settings, db=pg)
+    run(ctx, "create_routine", title="News", prompt="news", in_minutes=1)
+    later = datetime.now(timezone.utc) + timedelta(minutes=5)
+    ran = []
+    monkeypatch.setattr(automations, "run_routine", lambda c, mb, r: ran.append(r["id"]))
+    assert automations.run_due_routines(ctx, None, now=later) == 1 and automations.run_due_routines(ctx, None, now=later) == 0
+
+    monkeypatch.setattr("jarvis.safeurl.socket.getaddrinfo",
+                        lambda host, port, *a, **kw: [(2, 1, 6, "", ("93.184.216.34", port))])
+    run(ctx, "watch_page", url="https://shop.example/")
+    automations.run_due_watchers(ctx, None, fetch=lambda url: (url, "Shop", "Hello"))
+    assert pg.one("SELECT snapshot FROM watchers")["snapshot"] == "Hello"
+
+    doc = library.add_document(ctx, "Notes.txt", "The wifi password for the office is on the fridge.")
+    assert library.search(ctx, "wifi password")[0]["doc_id"] == doc  # keyword search (no key in tests)
+    assert library.forget(ctx, doc)
+
+    first = images.save(ctx, "p", b"PNG", "image/png")
+    assert images.get(ctx, first) == (b"PNG", "image/png") and images.made_since(ctx, 0) == [first]

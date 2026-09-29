@@ -24,6 +24,7 @@ from typing import Any, Callable
 
 import httpx
 
+from jarvis import images
 from jarvis.tools import Context, ToolError
 
 log = logging.getLogger("jarvis.telegram")
@@ -32,8 +33,8 @@ API = "https://api.telegram.org"
 LINK_CODE_SECONDS = 15 * 60
 MAX_WRONG_CODES = 5          # then the code stops working and a new one must be made
 MAX_MESSAGE = 4000
-FORWARD_KINDS = {"reminder", "briefing", "call", "error"}
-ICONS = {"reminder": "⏰", "briefing": "🌅", "call": "📞", "error": "⚠️"}
+FORWARD_KINDS = {"reminder", "briefing", "call", "error", "routine", "watch"}
+ICONS = {"reminder": "⏰", "briefing": "🌅", "call": "📞", "error": "⚠️", "routine": "🔁", "watch": ""}
 
 
 def _same(a: str, b: str) -> bool:
@@ -71,6 +72,23 @@ class TelegramBot:
         for n, chunk in enumerate(chunks):
             extra = {"reply_markup": {"inline_keyboard": buttons}} if buttons and n == len(chunks) - 1 else {}
             self.call("sendMessage", chat_id=chat_id, text=chunk, **extra)
+
+    def send_photo(self, chat_id: int, data: bytes, mime: str, caption: str = "") -> None:
+        ext = mime.split("/")[-1] or "png"
+        resp = self._http.post(f"{API}/bot{self.ctx.settings.telegram_bot_token}/sendPhoto",
+                               data={"chat_id": str(chat_id), "caption": caption[:1000]},
+                               files={"photo": (f"jarvis.{ext}", data, mime)})
+        if resp.status_code != 200:
+            raise RuntimeError(f"Telegram sendPhoto failed ({resp.status_code})")
+
+    def _send_new_pictures(self, chat_id: int, after_id: int) -> None:
+        for image_id in images.made_since(self.ctx, after_id):
+            found = images.get(self.ctx, image_id)
+            if found:
+                try:
+                    self.send_photo(chat_id, found[0], found[1])
+                except Exception:
+                    log.warning("Couldn't send picture #%s to Telegram", image_id)
 
     def username(self) -> str:
         if not self._username:
@@ -210,6 +228,7 @@ class TelegramBot:
         if not text and not attachment:
             return
         self.call("sendChatAction", chat_id=chat_id, action="typing")
+        before = images.latest_id(self.ctx)
         try:
             if attachment and attachment[2].startswith("audio/"):
                 heard = self.brain().describe_image(attachment[1], attachment[2], "", prompt=(
@@ -223,6 +242,7 @@ class TelegramBot:
             self.send(chat_id, f"Sorry, I hit a problem: {exc}")
             return
         self.send(chat_id, reply.text)
+        self._send_new_pictures(chat_id, before)
         for action in reply.actions:
             self.send(chat_id, f"Approval needed: {action['summary']}", buttons=[[
                 {"text": "✅ Approve", "callback_data": f"a:{action['id']}:1"},
@@ -281,8 +301,10 @@ class TelegramBot:
             self.send(chat_id, str(exc))
             return
         verdict = "approved" if approve_it else "denied"
+        before = images.latest_id(self.ctx)
         reply = self.brain().chat(f"(I {verdict} action #{action_id}: {row['summary']}. Result: {result})")
         self.send(chat_id, reply.text)
+        self._send_new_pictures(chat_id, before)
 
     # --- notifications -------------------------------------------------------------------
     def forward(self, event: dict) -> None:
@@ -292,7 +314,8 @@ class TelegramBot:
         owner = self.owner_chat
         if owner is None:
             return
-        text = f"{ICONS.get(event['kind'], '🔔')} {event.get('message', '')}"
+        icon = ICONS.get(event["kind"], "🔔")
+        text = f"{icon} {event.get('message', '')}" if icon else str(event.get("message", ""))
 
         def run() -> None:
             try:

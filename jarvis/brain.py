@@ -68,7 +68,13 @@ def default_system_prompt(ctx: Context, tools: list[Tool], voice: bool = False) 
         abilities.append("open and read web pages and online PDFs")
     if "get_calendar" in names and s.calendar_urls:
         abilities.append("check their calendar")
-    abilities.append("read files they attach (PDFs, documents, pictures)")
+    abilities.append("read files they attach (PDFs, documents, pictures) and search their saved library")
+    if "create_routine" in names:
+        abilities.append("run scheduled routines and watch web pages for changes")
+    if "market_quote" in names:
+        abilities.append("check live market prices")
+    if "generate_image" in names:
+        abilities.append("create and edit pictures")
     prompt = f"""You are JARVIS, the personal AI assistant of {s.my_name}. Address them as {s.my_name}.
 
 Personality: calm, capable, quietly witty, with the polished manner of a British butler
@@ -89,7 +95,12 @@ Time: each message from {s.my_name} starts with the current local date and time 
 brackets. Their timezone is {s.timezone}. Use it to work out reminder times.
 
 Files: a message may include <attached_file> with the contents of a file the user shared.
-Answer from it directly; don't say you can't open files.
+Answer from it directly; don't say you can't open files. Shared files are kept in their library:
+when they mention a document, contract, receipt or article from before, use search_library.
+
+Automations: for "every day/week… do X and tell me" use create_routine (it runs by itself and
+sends the result). For "tell me when this price drops / page changes" use watch_page. For a
+simple fixed alert use set_reminder.
 
 Reminders can repeat (daily, weekdays, weekly, monthly): use set_reminder's repeat option for
 things like "every morning at 8".
@@ -156,14 +167,27 @@ class Brain:
                     seen = self.describe_image(image[0], image[1], text)
                     text = f"{text}\n\n<my_screen_right_now>\n{seen}\n</my_screen_right_now>"
                 if attachment:
-                    from jarvis import files
-
-                    name, data, mime = attachment
-                    content = files.read_file(name, data, mime, text, self._look)
-                    text = files.with_file(text, name, content)
+                    text = self._attach(text, *attachment)
                 return self._chat(text)
             finally:
                 self._flush_usage()
+
+    def _attach(self, text: str, name: str, data: bytes, mime: str) -> str:
+        """The message with the file's contents added. The text is also saved to the
+        library (so it can be searched later), and a photo is kept briefly in memory
+        so the user can ask for it to be edited."""
+        from jarvis import files, images, library
+
+        content = files.read_file(name, data, mime, text, self._look)
+        if files.guess_type(name, mime) in files.IMAGE_TYPES:
+            images.remember(self.ctx, data, files.guess_type(name, mime))
+        note = ""
+        try:
+            doc_id = library.add_document(self.ctx, name, content, source="file")
+            note = f"\n(Saved to the user's library as document #{doc_id}.)"
+        except Exception:
+            log.warning("Couldn't save %s to the library", name, exc_info=True)
+        return files.with_file(text, name, content) + note
 
     def _look(self, data: bytes, mime: str, prompt: str) -> str:
         return self.describe_image(data, mime, "", prompt=prompt)

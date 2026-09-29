@@ -37,6 +37,8 @@
       <button data-view="reminders"><i data-icon="calendar"></i><span>Reminders</span><b id="navReminders"></b></button>
       <button data-view="facts"><i data-icon="database"></i><span>Memory</span><b id="navFacts"></b></button>
       <button data-view="notes"><i data-icon="book"></i><span>Notes</span><b id="navNotes"></b></button>
+      <button data-view="library"><i data-icon="library"></i><span>Library</span><b id="navLibrary"></b></button>
+      <button data-view="automations"><i data-icon="repeat"></i><span>Automations</span><b id="navAuto"></b></button>
       <button data-view="contacts"><i data-icon="users"></i><span>Contacts</span><b id="navContacts"></b></button>
       <button data-view="calls"><i data-icon="phone"></i><span>Phone Calls</span><b id="navCalls"></b></button>
       <button data-view="tools"><i data-icon="tool"></i><span>Tools &amp; Skills</span><b id="navTools"></b></button>
@@ -75,10 +77,22 @@
         <button id="telegramBtn" type="button" hidden>Link Telegram</button>
         <div class="menu-note" id="telegramBox" hidden></div>
         <button id="newChat" type="button">Start a new conversation</button>
+        <button id="hudBtn" type="button">Customize the live ticker</button>
+        <form class="hud-form" id="hudForm" hidden>
+          <label>Prices <input id="hudTickers" placeholder="BTC, ETH, GOLD, SPX, TSLA" autocomplete="off"></label>
+          <div class="hud-leagues" id="hudLeagues"></div>
+          <label><input type="checkbox" id="hudNews"> Headlines</label>
+          <button type="submit" class="send">Save</button>
+        </form>
         <button id="exportBtn" type="button">Download my data</button>
         <button id="lockBtn" type="button">Lock (forget access token)</button>
       </div>
     </header>
+
+    <section class="hud" id="hud" aria-label="Live ticker" hidden>
+      <div class="hud-weather" id="hudWeather" hidden></div>
+      <div class="hud-track" id="hudTrack"><div class="hud-items" id="hudItems"></div></div>
+    </section>
 
     <section class="core" aria-label="AI core">
       <dl class="stats left">

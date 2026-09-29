@@ -14,7 +14,7 @@ from jarvis.tools import Context
 
 log = logging.getLogger("jarvis.usage")
 
-KINDS = ("ai_calls", "ai_tokens_in", "ai_tokens_out", "tts_chars")
+KINDS = ("ai_calls", "ai_tokens_in", "ai_tokens_out", "tts_chars", "images")
 
 
 def record(ctx: Context, amounts: dict[str, int]) -> None:

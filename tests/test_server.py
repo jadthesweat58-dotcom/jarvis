@@ -17,7 +17,7 @@ def test_chat_from_localhost_without_token(ctx):
     with client:
         assert client.get("/").status_code == 200
         assert client.get("/api/status").json()["mode"] == "cloud"
-        assert client.post("/api/chat", json={"text": "hi"}).json() == {"reply": "Hello, Tony.", "actions": []}
+        assert client.post("/api/chat", json={"text": "hi"}).json() == {"reply": "Hello, Tony.", "actions": [], "images": []}
 
 
 def test_remote_access_needs_token(ctx):

@@ -146,7 +146,7 @@ def test_gemini_usage_is_counted(gctx):
         "usage_metadata": {"prompt_token_count": 900, "candidates_token_count": 40, "thoughts_token_count": 60},
     })
     GeminiBrain(gctx, client=FakeGemini(answer)).chat("hi")
-    assert usage.summary(gctx)["today"] == {"ai_calls": 1, "ai_tokens_in": 900, "ai_tokens_out": 100, "tts_chars": 0}
+    assert usage.summary(gctx)["today"] == {"ai_calls": 1, "ai_tokens_in": 900, "ai_tokens_out": 100, "tts_chars": 0, "images": 0}
 
 
 def test_gemini_reads_scanned_pdfs(gctx):

@@ -45,6 +45,9 @@
     stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
     eye: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/>',
+    library: '<path d="M4 4h4v16H4zM10 4h4v16h-4z"/><path d="m16.5 5.2 3.8-1 3.2 15.6-3.9.9z"/>',
+    repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
+    trend: '<path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/>',
     clip: '<path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/>',
   };
   const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.grid}</svg>`;
@@ -149,8 +152,29 @@
     }
   }
 
+  // Pictures Jarvis made: fetched with the access token, shown in both chat logs.
+  async function showImages(ids) {
+    for (const id of ids || []) {
+      try {
+        const res = await fetch(`/api/images/${id}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (!res.ok) throw new Error(`Error ${res.status}`);
+        const url = URL.createObjectURL(await res.blob());
+        for (const log of [boxLog, chatLog]) {
+          const m = el("div", "msg jarvis");
+          const img = el("img");
+          img.src = url; img.alt = `Picture #${id} made by Jarvis`;
+          img.onclick = () => window.open(url, "_blank", "noopener");
+          m.appendChild(img);
+          log.appendChild(m);
+        }
+        boxLog.scrollTop = boxLog.scrollHeight;
+      } catch (e) { toast(`Couldn't show picture #${id}: ${e.message}`, true); }
+    }
+  }
+
   async function handleReply(data, userText) {
     addMsg("jarvis", data.reply);
+    showImages(data.images);
     live("");
     showApprovals(data.actions);
     refresh();
@@ -299,6 +323,7 @@
 
   // ------------------------------------------------------------------ drawer: conversation, lists, notifications
   const TITLES = { chat: "CONVERSATIONS", todos: "TASKS", reminders: "REMINDERS", facts: "MEMORY", notes: "NOTES",
+                   library: "LIBRARY", automations: "AUTOMATIONS",
                    contacts: "CONTACTS", calls: "PHONE CALLS", tools: "TOOLS & SKILLS", alerts: "NOTIFICATIONS" };
   function selectNav(name) {
     document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
@@ -318,20 +343,84 @@
     openDrawer(TITLES[name] || name.toUpperCase(), name === "chat");
     if (name === "chat") { setTimeout(() => $("drawerInput").focus(), 200); return; }
     if (name === "alerts") return renderAlerts();
+    if (name === "automations") return renderAutomations();
     const list = $("itemList");
     list.innerHTML = '<li class="empty">Loading…</li>';
     try {
       const rows = await api(`/api/list/${name}`);
       list.innerHTML = "";
       if (!rows.length) list.appendChild(el("li", "empty", "Nothing here yet. Just ask Jarvis."));
+      if (name === "library" && !rows.length) {
+        list.innerHTML = "";
+        list.appendChild(el("li", "empty", "Files you attach in the chat are saved here, so you can ask about them later."));
+      }
       for (const r of rows) {
         const li = el("li", r.done ? "done" : "");
         li.appendChild(el("strong", "", r.title || "(untitled)"));
         if (r.detail) li.appendChild(el("small", "", r.detail));
+        if (name === "library") {
+          li.appendChild(el("span", "meta", `${Number(r.chars || 0).toLocaleString()} characters · saved ${String(r.created_at || "").slice(0, 10)}`));
+          const row = el("div", "row");
+          const del = el("button", "btn-sm no", "Remove");
+          del.onclick = async () => {
+            if (!confirm(`Remove "${r.title}" from the library?`)) return;
+            try { await api(`/api/library/${r.id}/delete`, {}); li.remove(); refresh(); } catch (e) { toast(e.message, true); }
+          };
+          row.appendChild(del);
+          li.appendChild(row);
+        }
         list.appendChild(li);
       }
     } catch (e) { list.innerHTML = ""; list.appendChild(el("li", "empty", e.message)); }
   }
+  async function renderAutomations() {
+    const list = $("itemList");
+    list.innerHTML = '<li class="empty">Loading…</li>';
+    let data;
+    try { data = await api("/api/automations"); } catch (e) { list.innerHTML = ""; list.appendChild(el("li", "empty", e.message)); return; }
+    list.innerHTML = "";
+    const act = async (kind, id, action) => {
+      if (action === "delete" && !confirm(`Delete this ${kind}?`)) return;
+      try {
+        await api(`/api/automations/${kind}/${id}`, { action });
+        if (action === "run") toast(kind === "routine" ? "Running it now; the result arrives in a minute or two." : "Checking it now.");
+        renderAutomations(); refresh();
+      } catch (e) { toast(e.message, true); }
+    };
+    const buttons = (kind, id, paused) => {
+      const row = el("div", "row");
+      for (const [label, action, cls] of [[kind === "routine" ? "Run now" : "Check now", "run", "ok"],
+                                          [paused ? "Resume" : "Pause", paused ? "resume" : "pause", ""],
+                                          ["Delete", "delete", "no"]]) {
+        const b = el("button", `btn-sm ${cls}`.trim(), label);
+        b.onclick = () => act(kind, id, action);
+        row.appendChild(b);
+      }
+      return row;
+    };
+    list.appendChild(el("h4", "", "ROUTINES"));
+    if (!data.routines.length) list.appendChild(el("li", "empty", 'Try: "Every Friday at 6pm, find fun things to do in Dubai this weekend."'));
+    for (const r of data.routines) {
+      const li = el("li", r.enabled ? "" : "paused");
+      li.append(el("strong", "", `${r.title}${r.enabled ? "" : " (paused)"}`), el("small", "", r.prompt),
+                el("span", "meta", `${r.schedule} · next ${r.next_local}${r.last_local ? ` · last ${r.last_local}` : ""}`));
+      if (r.last_result) li.appendChild(el("small", "", `Last result: ${r.last_result.slice(0, 400)}`));
+      li.appendChild(buttons("routine", r.id, !r.enabled));
+      list.appendChild(li);
+    }
+    list.appendChild(el("h4", "", "WATCHERS"));
+    if (!data.watchers.length) list.appendChild(el("li", "empty", 'Try: "Watch this page and tell me when the price is under 500 AED: <link>"'));
+    for (const w of data.watchers) {
+      const paused = w.status !== "active";
+      const li = el("li", paused ? "paused" : "");
+      li.append(el("strong", "", w.condition || "Any meaningful change"), el("small", "", w.url),
+                el("span", "meta", `${w.status === "done" ? "Done ✓" : paused ? "Paused" : `every ${w.every_hours}h`}${w.last_local ? ` · checked ${w.last_local}` : ""}`));
+      if (w.last_note) li.appendChild(el("small", "", w.last_note));
+      li.appendChild(buttons("watcher", w.id, paused));
+      list.appendChild(li);
+    }
+  }
+
   function renderAlerts() {
     const list = $("itemList");
     list.innerHTML = "";
@@ -770,13 +859,95 @@
     } catch { /* offline: the pill says so */ }
   }
 
+  // ------------------------------------------------------------------ live ticker (HUD)
+  const LEAGUE_NAMES = { "eng.1": "Premier League", "esp.1": "LaLiga", "ita.1": "Serie A", "ger.1": "Bundesliga",
+                         "fra.1": "Ligue 1", "uefa.champions": "Champions League", "ksa.1": "Saudi Pro League" };
+  let hudPrefs = null;
+  const money = (n) => (n >= 1000 ? n.toLocaleString([], { maximumFractionDigits: 0 }) : n.toLocaleString([], { maximumFractionDigits: n < 10 ? 4 : 2 }));
+  function hudItem(parts) {
+    const span = el("span");
+    for (const p of parts) span.append(typeof p === "string" ? document.createTextNode(p) : p);
+    return span;
+  }
+  async function pollHud() {
+    let d;
+    try { d = await api("/api/hud"); } catch { return; }
+    hudPrefs = d.settings;
+    const items = [];
+    for (const q of d.markets || []) {
+      const dir = q.change > 0 ? "up" : q.change < 0 ? "down" : "";
+      items.push(hudItem([el("span", "tag", q.label.toUpperCase()), el("b", "", `$${money(q.price)}`),
+                          el("span", dir, `${q.change > 0 ? "▲" : q.change < 0 ? "▼" : "•"} ${Math.abs(q.change).toFixed(2)}%`)]));
+    }
+    for (const m of d.football || []) {
+      const score = m.state === "pre" ? "v" : `${m.home_score ?? 0}–${m.away_score ?? 0}`;
+      const when = m.state === "pre" ? new Date(m.kickoff).toLocaleTimeString([], { weekday: "short", hour: "2-digit", minute: "2-digit" }) : m.detail;
+      items.push(hudItem([el("span", "tag", "⚽"), `${m.home} `, el("b", "", score), ` ${m.away} `,
+                          el("span", m.state === "in" ? "live" : "", m.state === "in" ? `● ${m.detail}` : when)]));
+    }
+    for (const n of d.news || []) {
+      const a = el("a", "", n.title);
+      a.href = n.link; a.target = "_blank"; a.rel = "noopener";
+      items.push(hudItem([el("span", "tag", "NEWS"), a, n.source ? ` · ${n.source}` : ""]));
+    }
+    const box = $("hudItems");
+    box.innerHTML = "";
+    if (!items.length) { $("hud").hidden = !status.home_city; return; }
+    // Two copies side by side make the scroll loop seamlessly.
+    for (let copy = 0; copy < 2; copy++) for (const it of items) box.appendChild(copy ? it.cloneNode(true) : it);
+    box.querySelectorAll("a").forEach((a, i) => { if (i >= (d.news || []).length) a.tabIndex = -1; });
+    box.style.setProperty("--hud-speed", `${Math.max(30, items.length * 7)}s`);
+    $("hud").hidden = false;
+  }
+  async function pollWeather() {
+    if (!status.home_city) return;
+    try {
+      const w = await api("/api/weather");
+      if (!w.available) return;
+      const chip = $("hudWeather");
+      chip.innerHTML = "";
+      chip.append(iconEl(/rain|shower|drizzle|thunder/.test(w.summary) ? "cloud" : "sun"),
+                  el("span", "", `${w.place.split(",")[0]} ${Math.round(w.temperature)}${w.unit.replace("°C", "°")} · ${w.summary}`));
+      chip.hidden = false;
+      $("hud").hidden = false;
+    } catch { /* optional */ }
+  }
+  $("hudBtn").onclick = () => {
+    const form = $("hudForm");
+    form.hidden = !form.hidden;
+    if (form.hidden || !hudPrefs) return;
+    $("hudTickers").value = hudPrefs.tickers.join(", ");
+    $("hudNews").checked = hudPrefs.news;
+    const box = $("hudLeagues");
+    box.innerHTML = "";
+    for (const [code, label] of Object.entries(LEAGUE_NAMES)) {
+      const l = el("label");
+      const c = el("input"); c.type = "checkbox"; c.value = code; c.checked = hudPrefs.leagues.includes(code);
+      l.append(c, document.createTextNode(label));
+      box.appendChild(l);
+    }
+  };
+  $("hudForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const tickers = $("hudTickers").value.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean);
+    const leagues = [...$("hudLeagues").querySelectorAll("input:checked")].map((c) => c.value);
+    try {
+      await api("/api/hud", { tickers, leagues, news: $("hudNews").checked });
+      $("hudForm").hidden = true;
+      toast("Ticker updated.");
+      pollHud();
+    } catch (err) { toast(err.message, true); }
+  });
+
   const fmtK = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1000 ? `${(n / 1000).toFixed(n >= 1e4 ? 0 : 1)}k` : String(n || 0));
   async function pollUsage() {
     try {
       const u = await api("/api/usage");
       const t = u.today || {}, m = u.month || {};
       const calls = t.ai_calls || 0;
-      $("usageAi").textContent = `${calls} call${calls === 1 ? "" : "s"} · ${fmtK((t.ai_tokens_in || 0) + (t.ai_tokens_out || 0))} tokens`;
+      const pics = t.images || 0;
+      $("usageAi").textContent = `${calls} call${calls === 1 ? "" : "s"} · ${fmtK((t.ai_tokens_in || 0) + (t.ai_tokens_out || 0))} tokens`
+        + (pics ? ` · ${pics} picture${pics === 1 ? "" : "s"}` : "");
       const voiceRow = status.tts === "elevenlabs";
       $("usageVoiceRow").hidden = !voiceRow;
       $("usageBarWrap").hidden = !(voiceRow && u.tts_quota);
@@ -809,6 +980,7 @@
     const set = (id, n) => { $(id).textContent = n ? String(n) : ""; };
     set("navTurns", c.turns); set("navTodos", c.todos); set("navReminders", c.reminders); set("navFacts", c.facts);
     set("navNotes", c.notes); set("navContacts", c.contacts); set("navCalls", c.calls); set("navTools", c.tools);
+    set("navLibrary", c.library); set("navAuto", c.automations);
   }
   function setSystem(ok) {
     const pill = $("sysPill");
@@ -842,6 +1014,9 @@
       if (ev.kind === "briefing") {  // the morning briefing: show it as Jarvis speaking
         addMsg("jarvis", ev.message);
         toast("🌅 Your morning briefing is here.");
+      } else if (ev.kind === "routine" || ev.kind === "watch") {
+        addMsg("jarvis", ev.message);
+        toast(ev.kind === "routine" ? "🔁 A routine finished." : "🔎 A watcher has news.");
       } else {
         addMsg("system", `🔔 ${ev.message}`);
         toast(`🔔 ${ev.message}`);
@@ -968,9 +1143,13 @@
       await refresh();
       pollSystem();
       pollUsage();
+      pollHud();
+      pollWeather();
       listenForEvents();
       if (!timers) {
         timers = true;
+        setInterval(pollHud, 60000);
+        setInterval(pollWeather, 15 * 60000);
         setupPush();
         setInterval(pollUsage, 60000);
         setInterval(refresh, 20000);
