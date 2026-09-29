@@ -14,8 +14,9 @@ from jarvis.tools.reminders import REPEATS, describe_repeat, parse_when, repeat_
     "create_routine",
     "Schedule a task Jarvis does by itself and sends the user the result, e.g. 'every Friday at 6pm "
     "find fun events in Dubai this weekend' or 'every weekday at 7:45 give me the top tech news'. "
-    "Routines can search the web and read pages but can't call, text or run commands. For a plain "
-    "alert with fixed text, use set_reminder instead.",
+    "Routines can search the web, read pages and check weather, prices and currencies; they can't see "
+    "the user's private data (notes, library, contacts, calendar) or change anything. The user approves "
+    "each new routine. For a plain alert with fixed text, use set_reminder instead.",
     {
         "title": {"type": "string", "description": "Short name, e.g. 'Weekend plans'."},
         "prompt": {"type": "string", "description": "The task in plain words, as the user would ask it."},
@@ -24,6 +25,9 @@ from jarvis.tools.reminders import REPEATS, describe_repeat, parse_when, repeat_
         "repeat": {"type": "string", "enum": REPEATS, "description": "How often. Default daily."},
     },
     ["title", "prompt"],
+    needs_approval=True,
+    summarize=lambda ctx, a: (f"New routine \"{a.get('title', '')}\" ({a.get('repeat') or 'daily'}): "
+                              f"{str(a.get('prompt', ''))[:300]}"),
 )
 def create_routine(ctx: Context, args: dict) -> str:
     from jarvis.automations import MAX_ROUTINES
@@ -69,17 +73,16 @@ def run_routine_now(ctx: Context, args: dict) -> str:
 
 
 def queue_now(ctx: Context, kind: str, item_id: int) -> bool:
-    """Make a routine or watcher due now (the tick picks it up within a minute).
-    Setting it a moment in the past keeps a routine's clock time for later runs."""
-    soon = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(timespec="seconds")
+    """Run a routine, or check a watcher, within the next minute. The regular schedule
+    stays as it was, and a paused routine stays paused."""
     if kind == "routine":
-        row = ctx.db.one("SELECT next_run FROM routines WHERE id = ?", (item_id,))
-        if not row:
-            return False
-        # Keep the original time of day: run now, then carry on from the next scheduled slot.
-        return bool(ctx.db.execute("UPDATE routines SET next_run = ?, enabled = 1 WHERE id = ?", (soon, item_id)))
-    return bool(ctx.db.execute("UPDATE watchers SET next_check = ?, status = 'active', fails = 0 WHERE id = ?",
-                               (soon, item_id)))
+        return bool(ctx.db.execute("UPDATE routines SET run_now = 1 WHERE id = ?", (item_id,)))
+    if not ctx.db.one("SELECT id FROM watchers WHERE id = ?", (item_id,)):
+        return False
+    soon = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(timespec="seconds")
+    if not ctx.db.execute("UPDATE watchers SET next_check = ? WHERE id = ? AND status = 'active'", (soon, item_id)):
+        raise ToolError(f"Watcher #{item_id} is paused or finished; resume it first.")
+    return True
 
 
 # ------------------------------------------------------------------ watchers
@@ -87,13 +90,17 @@ def queue_now(ctx: Context, kind: str, item_id: int) -> bool:
     "watch_page",
     "Keep an eye on a web page and alert the user: either when a condition becomes true ('price below "
     "500 AED', 'tickets are on sale', 'the store says in stock') or, with no condition, when the page "
-    "changes in a meaningful way. Checks every few hours. Some shops block automatic checks.",
+    "changes in a meaningful way. Checks every few hours. Some shops block automatic checks. The user "
+    "approves each new watcher.",
     {
         "url": {"type": "string"},
         "condition": {"type": "string", "description": "What to wait for, in plain words. Leave empty for any meaningful change."},
         "every_hours": {"type": "integer", "description": "How often to check (1-168). Default 6."},
     },
     ["url"],
+    needs_approval=True,
+    summarize=lambda ctx, a: (f"Watch {a.get('url', '')} every {a.get('every_hours') or 6}h for: "
+                              f"{a.get('condition') or 'any meaningful change'}"),
 )
 def watch_page(ctx: Context, args: dict) -> str:
     from jarvis import safeurl

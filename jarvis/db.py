@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS routines (
     last_run TEXT,
     last_result TEXT NOT NULL DEFAULT '',
     enabled INTEGER NOT NULL DEFAULT 1,
+    run_now INTEGER NOT NULL DEFAULT 0,  -- 1 = run once as soon as possible ("Run now")
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS watchers (

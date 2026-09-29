@@ -27,6 +27,7 @@ from jarvis.tools.memory import facts_for_prompt
 log = logging.getLogger("jarvis.brain")
 
 MAX_TOOL_ROUNDS = 15
+AI_TIMEOUT = 300  # seconds; a hung request must not block scheduled jobs forever
 MAX_HISTORY_MESSAGES = 120
 # Models with the newest web search tool and server-side refusal fallbacks.
 MODERN_WEB_SEARCH = ("claude-opus-5", "claude-fable-5", "claude-sonnet-5", "claude-opus-4-8",
@@ -185,6 +186,8 @@ class Brain:
         try:
             doc_id = library.add_document(self.ctx, name, content, source="file")
             note = f"\n(Saved to the user's library as document #{doc_id}.)"
+        except library.LibraryFull as exc:
+            note = f"\n(Not saved to the library: {exc})"
         except Exception:
             log.warning("Couldn't save %s to the library", name, exc_info=True)
         return files.with_file(text, name, content) + note
@@ -248,7 +251,7 @@ class Brain:
         if self.client is None:
             if not self.settings.anthropic_api_key:
                 raise RuntimeError("ANTHROPIC_API_KEY is not set. Add it to your .env file (or your cloud host's environment settings).")
-            self.client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key)
+            self.client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key, timeout=AI_TIMEOUT)
         return self.client
 
     def _tool_definitions(self) -> list[dict]:

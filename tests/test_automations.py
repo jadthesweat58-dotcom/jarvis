@@ -8,7 +8,7 @@ from jarvis import automations
 from jarvis.brain import Brain
 from jarvis.server import create_app
 from jarvis.tools import REGISTRY, ToolError, load_all
-from tests.conftest import FakeClaude, response, text
+from tests.conftest import FakeClaude, response, text, tool_use
 
 UTC = timezone.utc
 
@@ -41,6 +41,26 @@ def test_create_and_list_routine(ctx):
     assert "Weekend plans (every week; next Fri 04 Oct 2030 18:00)" in run(ctx, "list_routines")
 
 
+def test_routines_never_get_private_or_risky_tools(phone_ctx):
+    """Even with the phone and pictures set up, a routine only gets public-information tools."""
+    phone_ctx.settings.gemini_api_key = "k"
+    names = {t.name for t in automations.safe_tools(phone_ctx.settings)}
+    risky = {"set_reminder", "call_me", "text_me", "remember_fact", "forget_fact", "add_contact", "list_contacts",
+             "search_library", "search_notes", "get_calendar", "save_webpage", "complete_todo", "generate_image",
+             "create_routine", "watch_page", "recall_facts", "add_note", "add_todo"}
+    assert names and not names & risky
+
+
+def test_new_routines_and_watchers_need_approval(ctx, public):
+    claude = FakeClaude(
+        response(tool_use("create_routine", {"title": "News", "prompt": "news", "in_minutes": 5})),
+        response(text("Approve it and I'll set it up.")),
+    )
+    reply = Brain(ctx, client=claude).chat("every day give me news")
+    assert reply.actions and "New routine \"News\"" in reply.actions[0]["summary"]
+    assert ctx.db.query("SELECT id FROM routines") == []
+
+
 def test_routine_runs_once_with_safe_tools_and_reports(ctx):
     events = []
     ctx.notifier.subscribe(events.append)
@@ -50,8 +70,9 @@ def test_routine_runs_once_with_safe_tools_and_reports(ctx):
     assert automations.run_due_routines(ctx, make, now=later) == 1
     assert automations.run_due_routines(ctx, make, now=later) == 0  # claimed: never twice
     tools = {t.name for t in made[0]["tools"]}
-    assert not tools & {"call_contact", "text_contact", "run_command", "create_routine", "generate_image", "write_file"}
-    assert {"get_weather", "read_webpage", "search_library"} <= tools
+    assert tools == {"get_weather", "calculate", "convert_currency", "world_time", "prayer_times",
+                     "market_quote", "read_webpage"}
+    assert made[0]["remember_facts"] is False
     assert "Top 3 tech headlines" in claude.requests[0]["messages"][-1]["content"][-1]["text"]
     row = ctx.db.one("SELECT * FROM routines")
     assert row["last_result"] == "1. A. 2. B. 3. C." and datetime.fromisoformat(row["next_run"]) > later
@@ -77,11 +98,15 @@ def test_routine_limits_and_run_now(ctx):
         run(ctx, "create_routine", title=f"R{i}", prompt="x", in_minutes=60)
     with pytest.raises(ToolError, match="already"):
         run(ctx, "create_routine", title="one too many", prompt="x", in_minutes=60)
+    before = ctx.db.one("SELECT next_run FROM routines WHERE id = 3")["next_run"]
+    ctx.db.execute("UPDATE routines SET enabled = 0 WHERE id = 3")
     run(ctx, "run_routine_now", id=3)
     make, _, _ = brains(ctx, response(text("done")))
     assert automations.run_due_routines(ctx, make) == 1
-    row = ctx.db.one("SELECT next_run FROM routines WHERE id = 3")
-    assert datetime.fromisoformat(row["next_run"]) > datetime.now(UTC)
+    assert automations.run_due_routines(ctx, make) == 0
+    row = ctx.db.one("SELECT next_run, enabled, last_result FROM routines WHERE id = 3")
+    # Ran once; the regular schedule is untouched and it stays paused.
+    assert row == {"next_run": before, "enabled": 0, "last_result": "done"}
     with pytest.raises(ToolError):
         run(ctx, "delete_routine", id=999)
 
@@ -178,11 +203,44 @@ def test_automation_endpoints(ctx, public):
     assert client.post("/api/automations/routine/1", json={"action": "pause"}).json() == {"ok": True}
     assert ctx.db.one("SELECT enabled FROM routines")["enabled"] == 0
     client.post("/api/automations/routine/1", json={"action": "run"})
-    assert ctx.db.one("SELECT enabled FROM routines")["enabled"] == 1
+    assert ctx.db.one("SELECT enabled, run_now FROM routines") == {"enabled": 0, "run_now": 1}
     client.post("/api/automations/watcher/1", json={"action": "pause"})
     assert ctx.db.one("SELECT status FROM watchers")["status"] == "paused"
+    assert client.post("/api/automations/watcher/1", json={"action": "run"}).status_code == 409
     assert client.post("/api/automations/watcher/1", json={"action": "delete"}).json() == {"ok": True}
     assert client.post("/api/automations/watcher/1", json={"action": "delete"}).status_code == 404
     assert client.post("/api/automations/nope/1", json={"action": "run"}).status_code == 404
     assert client.post("/api/automations/routine/1", json={"action": "explode"}).status_code == 400
-    assert client.get("/api/dashboard").json()["counts"]["automations"] == 1
+    assert client.get("/api/dashboard").json()["counts"]["automations"] == 0  # paused + deleted
+
+
+def test_watcher_saves_ai_calls_and_keeps_changes_when_judging_fails(ctx, public):
+    events = []
+    ctx.notifier.subscribe(events.append)
+    run(ctx, "watch_page", url="https://shop.example/", condition="price below 500 AED")
+    make, claude, _ = brains(ctx, response(text('{"met": false, "detail": "Now 649 AED, see https://evil.example/x"}')))
+    automations.run_due_watchers(ctx, make, fetch=page("649 AED"))
+    assert ctx.db.one("SELECT last_note FROM watchers")["last_note"] == "Now 649 AED, see [link]"
+    due_now(ctx)
+    automations.run_due_watchers(ctx, make, fetch=page("649 AED"))  # unchanged page: no AI call
+    assert len(claude.requests) == 1
+
+    run(ctx, "watch_page", url="https://news.example/")
+    ctx.db.execute("UPDATE watchers SET snapshot = 'old text' WHERE id = 2")
+    ctx.db.execute("UPDATE watchers SET status = 'paused' WHERE id = 1")
+    broken, _, _ = brains(ctx, response(text("not json at all")))
+    due_now(ctx)
+    ctx.db.execute("UPDATE watchers SET status = 'active' WHERE id = 2")
+    automations.run_due_watchers(ctx, broken, fetch=page("new text"))
+    row = ctx.db.one("SELECT snapshot, last_note FROM watchers WHERE id = 2")
+    assert row["snapshot"] == "old text" and "couldn't judge" in row["last_note"]  # looked at again next time
+    assert events == []
+
+
+def test_pause_during_a_check_is_kept(ctx, public):
+    run(ctx, "watch_page", url="https://shop.example/", condition="in stock")
+    w = ctx.db.one("SELECT * FROM watchers")
+    ctx.db.execute("UPDATE watchers SET status = 'paused'")  # the user pauses while the check runs
+    make, _, _ = brains(ctx, response(text('{"met": true, "detail": "In stock now"}')))
+    automations.check_watcher(ctx, make, w, fetch=page("In stock"))
+    assert ctx.db.one("SELECT status FROM watchers")["status"] == "paused"

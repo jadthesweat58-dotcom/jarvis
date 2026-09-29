@@ -150,11 +150,14 @@ iCloud calendars work too with their published .ics link. Treat the link like a 
 
 - **Routines** are jobs Jarvis does on its own and sends you: *"Every Friday at 6pm, find fun
   things to do in Dubai this weekend"*, *"Every weekday at 7:45, give me the top tech news"*.
-  They can search the web, read pages, check the weather and your library, but can never call,
-  text, run commands or do anything that needs your approval.
+  They can search the web, read pages, and check weather, prices and currencies. They can't see your
+  private data (notes, library, contacts, calendar) or change anything, so a web page with hidden
+  instructions can't trick a routine into leaking or doing things. You approve each new routine
+  and watcher with the same Approve button as calls.
 - **Watchers** check a web page every few hours: *"Watch this page and tell me when it's under 500
   AED: https://…"* or *"Tell me when this page changes"*. Jarvis ignores trivial changes (dates,
-  counters). Some shops block automatic checks; after 3 failures Jarvis tells you and pauses.
+  counters) and doesn't use the AI when the page hasn't changed. Some shops block automatic
+  checks; after 3 failures Jarvis tells you and pauses.
 - Results arrive in the chat box, as a phone notification and on Telegram. See, run, pause or
   delete them under **Automations** in the sidebar. Up to 20 of each. Each run uses a little
   Gemini, so keep an eye on the usage meter.

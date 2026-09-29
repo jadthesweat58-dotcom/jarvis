@@ -14,12 +14,16 @@ from jarvis.db import utcnow
 from jarvis.tools import Context
 
 KEEP = 40
+SAFE_TYPES = {"image/png", "image/jpeg", "image/webp"}   # never SVG/HTML: those could run code in the app
 REMEMBER_SECONDS = 30 * 60
 _last: dict[int, tuple[float, bytes, str]] = {}   # id(ctx) -> (when, picture, mime)
 _lock = threading.Lock()
 
 
 def save(ctx: Context, prompt: str, data: bytes, mime: str) -> int:
+    mime = mime.split(";")[0].strip().lower()
+    if mime not in SAFE_TYPES:
+        raise ValueError(f"Unexpected picture type {mime!r}.")
     image_id = ctx.db.execute("INSERT INTO images (prompt, mime, data, created_at) VALUES (?, ?, ?, ?)",
                               (prompt[:1000], mime, base64.b64encode(data).decode(), utcnow()))
     newest = ctx.db.query("SELECT id FROM images ORDER BY id DESC LIMIT 1 OFFSET ?", (KEEP - 1,))

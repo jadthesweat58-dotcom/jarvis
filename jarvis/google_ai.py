@@ -30,7 +30,9 @@ def client(settings: Any) -> Any:
         if key not in _clients:
             from google import genai
 
-            _clients[key] = genai.Client(api_key=key)
+            from google.genai import types
+
+            _clients[key] = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=120_000))
         return _clients[key]
 
 

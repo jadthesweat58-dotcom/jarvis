@@ -192,3 +192,27 @@ def test_generate_image_reads_the_picture_part(ctx, monkeypatch):
     monkeypatch.setattr(google_ai, "client", lambda s: SimpleNamespace(models=SimpleNamespace(generate_content=lambda **kw: blocked)))
     with pytest.raises(google_ai.AIUnavailable, match="I can't draw that"):
         google_ai.generate_image(ctx.settings, "x")
+
+
+def test_library_cap_and_cache_cleanup(gem, monkeypatch):
+    doc = library.add_document(gem, "Lease.pdf", LEASE)
+    library.search(gem, "lease notice")
+    assert any(k[1] for k in library._vector_cache)
+    library.forget(gem, doc)
+    assert not [k for k in library._vector_cache if k[0] == id(gem.db)]
+    monkeypatch.setattr(library, "MAX_CHUNKS", 2)
+    with pytest.raises(library.LibraryFull):
+        library.add_document(gem, "Lease.pdf", LEASE)
+    claude = FakeClaude(response(text("ok")))
+    Brain(gem, client=claude).chat("read", attachment=("lease.txt", LEASE.encode(), "text/plain"))
+    assert "Not saved to the library: The library is full" in claude.requests[0]["messages"][-1]["content"][-1]["text"]
+
+
+def test_only_safe_picture_types(ctx):
+    with pytest.raises(ValueError):
+        images.save(ctx, "x", b"<svg onload=alert(1)>", "image/svg+xml")
+    image_id = images.save(ctx, "x", PNG, "image/png")
+    app = create_app(ctx, brain_factory=lambda **kw: Brain(ctx, client=FakeClaude(), **kw))
+    client = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5000))
+    resp = client.get(f"/api/images/{image_id}")
+    assert resp.headers["x-content-type-options"] == "nosniff" and "sandbox" in resp.headers["content-security-policy"]

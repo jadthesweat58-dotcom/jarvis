@@ -55,5 +55,8 @@ def save_webpage(ctx: Context, args: dict) -> str:
     if not text.strip():
         raise ToolError("That page has no readable text to save.")
     name = (args.get("title") or title or final)[:200]
-    doc_id = library.add_document(ctx, name, text, source=final)
+    try:
+        doc_id = library.add_document(ctx, name, text, source=final)
+    except library.LibraryFull as exc:
+        raise ToolError(str(exc)) from exc
     return f"Saved \"{name}\" to the library as document #{doc_id}."

@@ -861,7 +861,8 @@
 
   // ------------------------------------------------------------------ live ticker (HUD)
   const LEAGUE_NAMES = { "eng.1": "Premier League", "esp.1": "LaLiga", "ita.1": "Serie A", "ger.1": "Bundesliga",
-                         "fra.1": "Ligue 1", "uefa.champions": "Champions League", "ksa.1": "Saudi Pro League" };
+                         "fra.1": "Ligue 1", "uefa.champions": "Champions League", "uefa.europa": "Europa League",
+                         "ksa.1": "Saudi Pro League", "usa.1": "MLS", "fifa.world": "World Cup" };
   let hudPrefs = null;
   const money = (n) => (n >= 1000 ? n.toLocaleString([], { maximumFractionDigits: 0 }) : n.toLocaleString([], { maximumFractionDigits: n < 10 ? 4 : 2 }));
   function hudItem(parts) {
@@ -876,7 +877,7 @@
     const items = [];
     for (const q of d.markets || []) {
       const dir = q.change > 0 ? "up" : q.change < 0 ? "down" : "";
-      items.push(hudItem([el("span", "tag", q.label.toUpperCase()), el("b", "", `$${money(q.price)}`),
+      items.push(hudItem([el("span", "tag", q.label.toUpperCase()), el("b", "", `${q.unit ?? "$"}${money(q.price)}`),
                           el("span", dir, `${q.change > 0 ? "▲" : q.change < 0 ? "▼" : "•"} ${Math.abs(q.change).toFixed(2)}%`)]));
     }
     for (const m of d.football || []) {
@@ -913,6 +914,7 @@
     } catch { /* optional */ }
   }
   $("hudBtn").onclick = () => {
+    if (!hudPrefs) { toast("The ticker settings haven't loaded yet. Try again in a moment.", true); return; }
     const form = $("hudForm");
     form.hidden = !form.hidden;
     if (form.hidden || !hudPrefs) return;
@@ -929,6 +931,7 @@
   };
   $("hudForm").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!hudPrefs) return;  // never save empty settings over the real ones
     const tickers = $("hudTickers").value.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean);
     const leagues = [...$("hudLeagues").querySelectorAll("input:checked")].map((c) => c.value);
     try {

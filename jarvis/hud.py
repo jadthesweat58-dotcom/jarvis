@@ -32,10 +32,11 @@ CRYPTO = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "XRP": "ripple",
           "BNB": "binancecoin", "ADA": "cardano", "TON": "the-open-network", "USDT": "tether",
           "AVAX": "avalanche-2", "DOT": "polkadot", "LTC": "litecoin", "TRX": "tron", "LINK": "chainlink"}
 # Friendly names for Stooq symbols; anything else is treated as a US stock ticker.
-STOOQ = {"GOLD": ("xauusd", "Gold"), "SILVER": ("xagusd", "Silver"), "OIL": ("cb.f", "Brent oil"),
-         "SPX": ("^spx", "S&P 500"), "SP500": ("^spx", "S&P 500"), "NASDAQ": ("^ndq", "Nasdaq"),
-         "DOW": ("^dji", "Dow Jones"), "EURUSD": ("eurusd", "EUR/USD"), "GBPUSD": ("gbpusd", "GBP/USD"),
-         "USDJPY": ("usdjpy", "USD/JPY"), "NIKKEI": ("^nkx", "Nikkei"), "FTSE": ("^ukx", "FTSE 100")}
+# unit: "$" for prices in US dollars, "" for index points and exchange rates.
+STOOQ = {"GOLD": ("xauusd", "Gold", "$"), "SILVER": ("xagusd", "Silver", "$"), "OIL": ("cb.f", "Brent oil", "$"),
+         "SPX": ("^spx", "S&P 500", ""), "SP500": ("^spx", "S&P 500", ""), "NASDAQ": ("^ndq", "Nasdaq", ""),
+         "DOW": ("^dji", "Dow Jones", ""), "EURUSD": ("eurusd", "EUR/USD", ""), "GBPUSD": ("gbpusd", "GBP/USD", ""),
+         "USDJPY": ("usdjpy", "USD/JPY", ""), "NIKKEI": ("^nkx", "Nikkei", ""), "FTSE": ("^ukx", "FTSE 100", "")}
 LEAGUES = {"eng.1": "Premier League", "esp.1": "LaLiga", "ita.1": "Serie A", "ger.1": "Bundesliga",
            "fra.1": "Ligue 1", "uefa.champions": "Champions League", "uefa.europa": "Europa League",
            "ksa.1": "Saudi Pro League", "usa.1": "MLS", "fifa.world": "World Cup"}
@@ -104,7 +105,7 @@ def crypto_quotes(symbols: list[str], http: Any = None) -> list[dict[str, Any]]:
     for coin, sym in ids.items():
         row = data.get(coin) or {}
         if row.get("usd") is not None:
-            out.append({"symbol": sym, "label": sym, "price": float(row["usd"]), "currency": "USD",
+            out.append({"symbol": sym, "label": sym, "price": float(row["usd"]), "currency": "USD", "unit": "$",
                         "change": round(float(row.get("usd_24h_change") or 0), 2)})
     return out
 
@@ -114,8 +115,8 @@ def stooq_quotes(symbols: list[str], http: Any = None) -> list[dict[str, Any]]:
     for sym in symbols:
         if sym in CRYPTO:
             continue
-        code, label = STOOQ.get(sym, (f"{sym.lower()}.us", sym))
-        wanted[code] = (sym, label)
+        code, label, unit = STOOQ.get(sym, (f"{sym.lower()}.us", sym, "$"))
+        wanted[code] = (sym, label, unit)
     if not wanted:
         return []
     from urllib.parse import quote
@@ -130,8 +131,8 @@ def stooq_quotes(symbols: list[str], http: Any = None) -> list[dict[str, Any]]:
             close, open_ = float(row["Close"]), float(row["Open"])
         except (KeyError, TypeError, ValueError):
             continue  # "N/D": unknown symbol or no trading yet
-        sym, label = wanted[code]
-        out.append({"symbol": sym, "label": label, "price": close, "currency": "USD",
+        sym, label, unit = wanted[code]
+        out.append({"symbol": sym, "label": label, "price": close, "currency": "USD" if unit else "", "unit": unit,
                     "change": round((close - open_) / open_ * 100, 2) if open_ else 0.0})
     order = {s: i for i, s in enumerate(symbols)}
     return sorted(out, key=lambda q: order.get(q["symbol"], 99))

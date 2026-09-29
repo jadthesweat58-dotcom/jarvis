@@ -443,9 +443,11 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
     @app.get("/api/images/{image_id}", dependencies=[Depends(require_user)])
     def get_image(image_id: int) -> Response:
         found = images.get(ctx, image_id)
-        if not found:
+        if not found or found[1] not in images.SAFE_TYPES:
             raise HTTPException(404, "No such picture (only the newest 40 are kept).")
-        return Response(found[0], media_type=found[1], headers={"Cache-Control": "private, max-age=86400"})
+        return Response(found[0], media_type=found[1], headers={
+            "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox"})
 
     # --- library + automations ----------------------------------------------------------
     @app.post("/api/library/{doc_id}/delete", dependencies=[Depends(require_user)])
@@ -475,7 +477,10 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
         if not table:
             raise HTTPException(404, "Unknown automation.")
         if body.action == "run":
-            changed = queue_now(ctx, kind, item_id)
+            try:
+                changed = queue_now(ctx, kind, item_id)
+            except ToolError as exc:
+                raise HTTPException(409, str(exc)) from exc
         elif body.action == "delete":
             changed = ctx.db.execute(f"DELETE FROM {table} WHERE id = ?", (item_id,))
         elif body.action in ("pause", "resume") and kind == "routine":

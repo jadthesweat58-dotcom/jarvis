@@ -347,7 +347,8 @@ def get_calendar(ctx: Context, args: dict) -> str:
 @tool(
     "market_quote",
     "Live price of crypto (BTC, ETH, SOL…), stocks (TSLA, AAPL, NVDA…), indices (SPX, NASDAQ, DOW), "
-    "gold, silver or oil. Prices are in US dollars; convert with convert_currency if asked.",
+    "gold, silver or oil. Prices marked $ are US dollars (convert with convert_currency if asked); "
+    "indices are in points and currency pairs are exchange rates.",
     {"symbols": {"type": "array", "items": {"type": "string"}, "description": "e.g. [\"BTC\", \"TSLA\", \"GOLD\"]"}},
     ["symbols"],
 )
@@ -361,7 +362,8 @@ def market_quote(ctx: Context, args: dict) -> str:
     if not found:
         raise ToolError("I couldn't get those prices right now.")
     missing = [s for s in symbols if s not in {q["symbol"] for q in found}]
-    lines = [f"{q['label']}: ${q['price']:,.2f} ({q['change']:+.2f}% today)" for q in found]
+    lines = [f"{q['label']}: {q.get('unit', '$')}{q['price']:,.{2 if q['price'] >= 1 else 4}f} ({q['change']:+.2f}% today)"
+             for q in found]
     return "\n".join(lines) + (f"\nNo price found for: {', '.join(missing)}" if missing else "")
 
 

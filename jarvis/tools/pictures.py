@@ -30,6 +30,9 @@ def generate_image(ctx: Context, args: dict) -> str:
         data, mime, note = google_ai.generate_image(ctx.settings, prompt, source)
     except google_ai.AIUnavailable as exc:
         raise ToolError(str(exc)) from exc
-    image_id = images.save(ctx, prompt, data, mime)
+    try:
+        image_id = images.save(ctx, prompt, data, mime)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
     usage.record(ctx, {"images": 1})
     return f"Picture #{image_id} is ready and on the user's screen." + (f" (Model's note: {note[:200]})" if note else "")

@@ -16,7 +16,7 @@ from typing import Any
 from google import genai
 from google.genai import types
 
-from jarvis.brain import MAX_HISTORY_MESSAGES, MAX_TOOL_ROUNDS, VISION_PROMPT, Brain, Reply
+from jarvis.brain import AI_TIMEOUT, MAX_HISTORY_MESSAGES, MAX_TOOL_ROUNDS, VISION_PROMPT, Brain, Reply
 from jarvis.tools import Context, Tool
 
 log = logging.getLogger("jarvis.gemini")
@@ -38,7 +38,8 @@ class GeminiBrain(Brain):
             if not self.settings.gemini_api_key:
                 raise RuntimeError("GEMINI_API_KEY is not set. Add it to your .env file "
                                    "(or your cloud host's environment settings).")
-            self.client = genai.Client(api_key=self.settings.gemini_api_key)
+            self.client = genai.Client(api_key=self.settings.gemini_api_key,
+                                       http_options=types.HttpOptions(timeout=AI_TIMEOUT * 1000))
         return self.client
 
     def _config(self) -> types.GenerateContentConfig:

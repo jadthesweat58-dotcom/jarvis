@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import re
 from typing import Any
+
+import numpy as np
 
 from jarvis.db import utcnow
 from jarvis.tools import Context
@@ -22,6 +23,8 @@ log = logging.getLogger("jarvis.library")
 CHUNK_CHARS = 1500
 OVERLAP = 200
 MAX_DOCUMENT_CHARS = 200_000
+MAX_CHUNKS = 6000          # ~9 million characters in all; keeps memory small on a free server
+INSERT_BATCH = 40
 BACKFILL_BATCH = 100
 
 
@@ -58,23 +61,37 @@ def _embed(ctx: Context, texts: list[str], query: bool = False) -> list[list[flo
         return None
 
 
+class LibraryFull(ValueError):
+    pass
+
+
 def add_document(ctx: Context, name: str, text: str, source: str = "file") -> int:
     """Save a document to the library. Returns its id."""
     text = text[:MAX_DOCUMENT_CHARS]
     pieces = chunk(text)
+    stored = int(ctx.db.one("SELECT COUNT(*) AS n FROM chunks")["n"] or 0)
+    if stored + len(pieces) > MAX_CHUNKS:
+        raise LibraryFull("The library is full. Remove some documents (Library in the sidebar) to add more.")
     summary = re.sub(r"\s+", " ", text[:280]).strip()
     doc_id = ctx.db.execute(
         "INSERT INTO documents (name, source, chars, summary, created_at) VALUES (?, ?, ?, ?, ?)",
         (name[:200], source[:500], len(text), summary, utcnow()))
     vectors = _embed(ctx, pieces) or [None] * len(pieces)
-    for idx, (piece, vec) in enumerate(zip(pieces, vectors)):
-        ctx.db.execute("INSERT INTO chunks (doc_id, idx, text, embedding) VALUES (?, ?, ?, ?)",
-                       (doc_id, idx, piece, json.dumps([round(v, 5) for v in vec]) if vec else None))
+    rows = [(doc_id, idx, piece, json.dumps([round(v, 5) for v in vec]) if vec else None)
+            for idx, (piece, vec) in enumerate(zip(pieces, vectors))]
+    # A few rows per statement: far fewer round trips to an online database.
+    for start in range(0, len(rows), INSERT_BATCH):
+        batch = rows[start:start + INSERT_BATCH]
+        ctx.db.execute("INSERT INTO chunks (doc_id, idx, text, embedding) VALUES "
+                       + ", ".join("(?, ?, ?, ?)" for _ in batch), [v for row in batch for v in row])
     return doc_id
 
 
 def forget(ctx: Context, doc_id: int) -> bool:
+    gone = [r["id"] for r in ctx.db.query("SELECT id FROM chunks WHERE doc_id = ?", (doc_id,))]
     ctx.db.execute("DELETE FROM chunks WHERE doc_id = ?", (doc_id,))
+    for chunk_id in gone:
+        _vector_cache.pop((id(ctx.db), chunk_id), None)
     return bool(ctx.db.execute("DELETE FROM documents WHERE id = ?", (doc_id,)))
 
 
@@ -91,10 +108,10 @@ def _backfill(ctx: Context) -> None:
                        (json.dumps([round(v, 5) for v in vec]), row["id"]))
 
 
-_vector_cache: dict[tuple[int, int], list[float]] = {}   # (id(db), chunk id) -> vector
+_vector_cache: dict[tuple[int, int], Any] = {}   # (id(db), chunk id) -> float32 vector (~3 KB)
 
 
-def _vectors(ctx: Context) -> dict[int, list[float]]:
+def _vectors(ctx: Context) -> dict[int, Any]:
     """Every embedded passage's vector. Kept in memory, so each search only
     downloads vectors it hasn't seen before (the database may be online)."""
     ids = [r["id"] for r in ctx.db.query("SELECT id FROM chunks WHERE embedding IS NOT NULL")]
@@ -104,15 +121,21 @@ def _vectors(ctx: Context) -> dict[int, list[float]]:
         batch = missing[start:start + 200]
         marks = ",".join("?" for _ in batch)
         for row in ctx.db.query(f"SELECT id, embedding FROM chunks WHERE id IN ({marks})", tuple(batch)):
-            _vector_cache[(key, row["id"])] = json.loads(row["embedding"])
+            _vector_cache[(key, row["id"])] = np.asarray(json.loads(row["embedding"]), dtype=np.float32)
     return {i: _vector_cache[(key, i)] for i in ids if (key, i) in _vector_cache}
 
 
-def _cosine(a: list[float], b: list[float]) -> float:
-    dot = sum(x * y for x, y in zip(a, b))
-    na = math.sqrt(sum(x * x for x in a))
-    nb = math.sqrt(sum(y * y for y in b))
-    return dot / (na * nb) if na and nb else 0.0
+def _similarities(query: list[float], vectors: dict[int, Any]) -> list[tuple[float, int]]:
+    """Cosine similarity of the question to every passage, best first."""
+    if not vectors:
+        return []
+    ids = list(vectors)
+    matrix = np.stack([vectors[i] for i in ids])
+    q = np.asarray(query, dtype=np.float32)
+    norms = np.linalg.norm(matrix, axis=1) * (np.linalg.norm(q) or 1.0)
+    scores = matrix @ q / np.where(norms == 0, 1.0, norms)
+    order = np.argsort(-scores)
+    return [(float(scores[i]), ids[i]) for i in order]
 
 
 def search(ctx: Context, query: str, k: int = 6) -> list[dict[str, Any]]:
@@ -129,8 +152,7 @@ def search(ctx: Context, query: str, k: int = 6) -> list[dict[str, Any]]:
         found = _embed(ctx, [query], query=True)
         qvec = found[0] if found else None
     if qvec:
-        vectors = _vectors(ctx)
-        scored = sorted(((_cosine(qvec, v), cid) for cid, v in vectors.items()), reverse=True)
+        scored = _similarities(qvec, _vectors(ctx))
         top = [(score, cid) for score, cid in scored[:k] if score > 0.3]
         if top:
             marks = ",".join("?" for _ in top)

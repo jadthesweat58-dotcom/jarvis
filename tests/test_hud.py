@@ -71,10 +71,10 @@ def fresh():
 def test_parsers():
     http = FakeHTTP()
     assert hud.quotes(["BTC", "GOLD", "ETH", "SPX", "FAKE"], http) == [
-        {"symbol": "BTC", "label": "BTC", "price": 63120.5, "currency": "USD", "change": 2.14},
-        {"symbol": "GOLD", "label": "Gold", "price": 2665.3, "currency": "USD", "change": 0.57},
-        {"symbol": "ETH", "label": "ETH", "price": 2410.1, "currency": "USD", "change": -1.5},
-        {"symbol": "SPX", "label": "S&P 500", "price": 5829.0, "currency": "USD", "change": 0.5},
+        {"symbol": "BTC", "label": "BTC", "price": 63120.5, "currency": "USD", "unit": "$", "change": 2.14},
+        {"symbol": "GOLD", "label": "Gold", "price": 2665.3, "currency": "USD", "unit": "$", "change": 0.57},
+        {"symbol": "ETH", "label": "ETH", "price": 2410.1, "currency": "USD", "unit": "$", "change": -1.5},
+        {"symbol": "SPX", "label": "S&P 500", "price": 5829.0, "currency": "", "unit": "", "change": 0.5},
     ]
     assert hud.headlines(http) == [
         {"title": "Dubai Metro Blue Line opens", "source": "Gulf News", "link": "https://news.google.com/a1"},
