@@ -33,8 +33,8 @@ API = "https://api.telegram.org"
 LINK_CODE_SECONDS = 15 * 60
 MAX_WRONG_CODES = 5          # then the code stops working and a new one must be made
 MAX_MESSAGE = 4000
-FORWARD_KINDS = {"reminder", "briefing", "call", "error", "routine", "watch"}
-ICONS = {"reminder": "⏰", "briefing": "🌅", "call": "📞", "error": "⚠️", "routine": "🔁", "watch": ""}
+FORWARD_KINDS = {"reminder", "briefing", "call", "error", "routine", "watch", "wrapup"}
+ICONS = {"reminder": "⏰", "briefing": "🌅", "call": "📞", "error": "⚠️", "routine": "🔁", "watch": "", "wrapup": "🌙"}
 
 
 def _same(a: str, b: str) -> bool:

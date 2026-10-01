@@ -66,6 +66,7 @@ def settings(tmp_path):
         Settings(),
         provider="claude",
         briefing_time="off",
+        wrapup_time="off",
         anthropic_api_key="test",
         gemini_api_key="",
         my_name="Tony",
@@ -86,6 +87,8 @@ def settings(tmp_path):
         elevenlabs_voice_id="",
         calendar_ics_url="",
         telegram_bot_token="",
+        google_client_id="",
+        google_client_secret="",
     )
 
 

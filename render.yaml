@@ -25,6 +25,8 @@ services:
         sync: false
       - key: BRIEFING_TIME
         value: "07:30"           # morning briefing (local time), or "off"
+      - key: WRAPUP_TIME
+        value: "21:00"           # evening wrap-up (local time), or "off"
       - key: JARVIS_EFFORT
         value: medium
       # Jarvis's voice (optional): https://elevenlabs.io
@@ -34,6 +36,11 @@ services:
         sync: false
       # Your calendar's secret iCal link (optional, read-only)
       - key: CALENDAR_ICS_URL
+        sync: false
+      # Gmail (optional): your Google OAuth client
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
         sync: false
       # Telegram bot token from @BotFather (optional)
       - key: TELEGRAM_BOT_TOKEN

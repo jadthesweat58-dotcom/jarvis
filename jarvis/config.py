@@ -36,6 +36,8 @@ class Settings:
     access_token: str = field(default_factory=lambda: _env("JARVIS_ACCESS_TOKEN"))
     # Morning briefing time (local, HH:MM), or "off".
     briefing_time: str = field(default_factory=lambda: _env("BRIEFING_TIME", "07:30").lower())
+    # Evening wrap-up time (local, HH:MM), or "off".
+    wrapup_time: str = field(default_factory=lambda: _env("WRAPUP_TIME", "21:00").lower())
     # Optional online database so memory survives on free hosting: a Postgres
     # connection string (e.g. Supabase), or a Turso database (https://turso.tech).
     database_url: str = field(default_factory=lambda: _env("DATABASE_URL"))
@@ -59,6 +61,9 @@ class Settings:
     calendar_ics_url: str = field(default_factory=lambda: _env("CALENDAR_ICS_URL"))
     # Optional: a Telegram bot (from @BotFather) so you can text Jarvis from your phone.
     telegram_bot_token: str = field(default_factory=lambda: _env("TELEGRAM_BOT_TOKEN"))
+    # Optional: Gmail, through your own Google Cloud OAuth client (see README "Gmail").
+    google_client_id: str = field(default_factory=lambda: _env("GOOGLE_CLIENT_ID"))
+    google_client_secret: str = field(default_factory=lambda: _env("GOOGLE_CLIENT_SECRET"))
 
     twilio_account_sid: str = field(default_factory=lambda: _env("TWILIO_ACCOUNT_SID"))
     twilio_auth_token: str = field(default_factory=lambda: _env("TWILIO_AUTH_TOKEN"))
@@ -94,6 +99,10 @@ class Settings:
     @property
     def calendar_urls(self) -> list[str]:
         return [u.strip() for u in self.calendar_ics_url.split(",") if u.strip()]
+
+    @property
+    def gmail_configured(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret)
 
     @property
     def telegram_enabled(self) -> bool:

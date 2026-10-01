@@ -25,7 +25,7 @@ from pydantic import BaseModel
 from twilio.request_validator import RequestValidator
 from twilio.twiml.voice_response import Gather, VoiceResponse
 
-from jarvis import agenda, automations, briefing, hud, images, library, push, usage
+from jarvis import agenda, automations, briefing, gmail, hud, images, library, push, usage, wrapup
 from jarvis.app import build_context
 from jarvis.brain import Brain, create_brain, resolve_action
 from jarvis.db import utcnow
@@ -167,7 +167,7 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        busy: dict[str, threading.Lock] = {k: threading.Lock() for k in ("briefing", "routines", "watchers")}
+        busy: dict[str, threading.Lock] = {k: threading.Lock() for k in ("briefing", "wrapup", "routines", "watchers")}
 
         def once(name: str, job: Callable[[], Any]) -> None:
             """Run a scheduled job in the background, never two copies at the same time."""
@@ -187,6 +187,7 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
         def every_minute() -> None:
             # These take a few seconds each (AI, web pages): don't hold up reminders.
             once("briefing", lambda: briefing.send_if_due(ctx, make_brain))
+            once("wrapup", lambda: wrapup.send_if_due(ctx, make_brain))
             once("routines", lambda: automations.run_due_routines(ctx, make_brain))
             once("watchers", lambda: automations.run_due_watchers(ctx, make_brain))
 
@@ -303,7 +304,8 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
                 "home_city": s.home_city, "timezone": s.timezone, "started_at": started_at,
                 "tts": "elevenlabs" if voice.enabled else "browser", "calendar": bool(s.calendar_urls),
                 "telegram": {"enabled": s.telegram_enabled, "linked": telegram.owner_chat is not None},
-                "pictures": bool(s.gemini_api_key)}
+                "pictures": bool(s.gemini_api_key),
+                "gmail": {"configured": s.gmail_configured, "email": gmail.connected_email(ctx) if s.gmail_configured else ""}}
 
     @app.post("/api/chat", dependencies=[Depends(require_user)])
     def chat(body: ChatIn) -> dict[str, Any]:
@@ -536,6 +538,43 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
             raise HTTPException(409, "No device accepted the test notification. Turn notifications on first.")
         return {"sent": sent}
 
+    # --- Gmail -----------------------------------------------------------------------------
+    @app.post("/api/gmail/connect", dependencies=[Depends(require_user)])
+    def gmail_connect(request: Request) -> dict[str, str]:
+        try:
+            return {"url": gmail.start(ctx, external_base(request))}
+        except gmail.GmailError as exc:
+            raise HTTPException(404, str(exc)) from exc
+
+    @app.post("/api/gmail/disconnect", dependencies=[Depends(require_user)])
+    def gmail_disconnect() -> dict[str, bool]:
+        gmail.disconnect(ctx)
+        return {"ok": True}
+
+    @app.get("/google/callback")
+    def gmail_callback(code: str = "", state: str = "", error: str = "") -> Response:
+        # Google sends the browser back here after sign-in. No access token is needed:
+        # the one-time "state" value (only made for the logged-in owner) proves it.
+        if error or not code:
+            title, text = "Gmail wasn't connected", "Google sign-in was cancelled. You can try again from Settings."
+        else:
+            try:
+                address = gmail.finish(ctx, code, state)
+                title, text = "Gmail connected ✓", f"Jarvis can now read your mail ({address}). You can close this tab."
+            except gmail.GmailError as exc:
+                title, text = "Gmail wasn't connected", str(exc)
+            except Exception:
+                log.exception("Gmail sign-in failed")
+                title, text = "Gmail wasn't connected", "Something went wrong talking to Google. Please try again."
+        import html as html_lib
+
+        page = (f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>"
+                f"<title>{html_lib.escape(title)}</title><body style='background:#07111b;color:#e3eef8;"
+                f"font:16px system-ui;display:grid;place-items:center;min-height:90vh;text-align:center'>"
+                f"<div><h2>{html_lib.escape(title)}</h2><p>{html_lib.escape(text)}</p>"
+                f"<p><a style='color:#3aa6ff' href='/'>Back to Jarvis</a></p></div>")
+        return Response(page, media_type="text/html", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
     # --- Telegram --------------------------------------------------------------------------
     @app.post("/api/telegram/link", dependencies=[Depends(require_user)])
     def telegram_link() -> dict[str, Any]:
@@ -599,7 +638,8 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
 
     @app.post("/api/todos/{todo_id}", dependencies=[Depends(require_user)])
     def set_task_done(todo_id: int, body: DoneIn) -> dict[str, bool]:
-        if not ctx.db.execute("UPDATE todos SET done = ? WHERE id = ?", (int(body.done), todo_id)):
+        if not ctx.db.execute("UPDATE todos SET done = ?, done_at = ? WHERE id = ?",
+                              (int(body.done), utcnow() if body.done else None, todo_id)):
             raise HTTPException(404, "No such task.")
         return {"ok": True}
 

@@ -48,6 +48,7 @@
     library: '<path d="M4 4h4v16H4zM10 4h4v16h-4z"/><path d="m16.5 5.2 3.8-1 3.2 15.6-3.9.9z"/>',
     repeat: '<path d="M17 2l4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15M7 22l-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>',
     trend: '<path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/>',
+    waves: '<path d="M2 12h2M6 8v8M10 5v14M14 8v8M18 10v4M22 12h0"/>',
     clip: '<path d="m21 11-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/>',
   };
   const icon = (name) => `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ICONS.grid}</svg>`;
@@ -93,6 +94,7 @@
 
   // ------------------------------------------------------------------ state
   let status = {}, dash = null;
+  let convMode = false;       // hands-free conversation: listen again after every reply
   const events = [];          // notifications received this session (newest first)
   let unread = 0;
   const voiceOut = "speechSynthesis" in window;
@@ -103,8 +105,8 @@
     core.mode = mode || "idle";
     $("coreState").textContent = STATE_TEXT[core.mode];
     const vs = $("voiceState");
-    vs.textContent = core.mode === "idle" ? (wakeOn() ? "Wake word on" : "Standby") : core.mode[0].toUpperCase() + core.mode.slice(1);
-    vs.classList.toggle("on", core.mode !== "idle" || wakeOn());
+    vs.textContent = core.mode === "idle" ? (convMode ? "Conversation" : wakeOn() ? "Wake word on" : "Standby") : core.mode[0].toUpperCase() + core.mode.slice(1);
+    vs.classList.toggle("on", core.mode !== "idle" || wakeOn() || convMode);
     const busyVoice = core.mode === "listening" || core.mode === "speaking";
     $("talkLabel").textContent = busyVoice ? "Stop" : "Talk";
     $("talkIcon").dataset.icon = busyVoice ? "stop" : "mic";
@@ -180,6 +182,7 @@
     refresh();
     setTimeout(pollUsage, 4000);  // after the voice has been fetched too
     await speak(data.reply);
+    if (convMode && !speakToggle.checked) listenAgain();
   }
 
   let busy = false;
@@ -302,6 +305,7 @@
     } finally {
       busy = false;
       if (core.mode === "thinking") setMode("idle");
+      if (convMode && core.mode === "idle") listenAgain();
     }
   }
 
@@ -483,6 +487,20 @@
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     } catch (e) { toast(`Couldn't download your data: ${e.message}`, true); }
   };
+  $("gmailBtn").onclick = async () => {
+    try {
+      if ((status.gmail || {}).email) {
+        if (!confirm("Disconnect Gmail? Jarvis will no longer read your mail.")) return;
+        await api("/api/gmail/disconnect", {});
+        status.gmail.email = "";
+        $("gmailBtn").textContent = "Connect Gmail";
+        toast("Gmail disconnected.");
+      } else {
+        const { url } = await api("/api/gmail/connect", {});
+        location.href = url;  // Google sign-in, then back to Jarvis
+      }
+    } catch (e) { toast(e.message, true); }
+  };
   $("telegramBtn").onclick = async () => {
     const box = $("telegramBox");
     try {
@@ -595,7 +613,7 @@
   }
 
   function finish(id, resolve) {
-    if (id === utteranceId) { setMode("idle"); resumeListening(); }
+    if (id === utteranceId) { setMode("idle"); if (convMode) listenAgain(); else resumeListening(); }
     resolve();
   }
 
@@ -652,11 +670,13 @@
     }
     return speakBrowser(text, id);
   }
-  function stopSpeaking() { utteranceId++; stopAudio(); setMode("idle"); resumeListening(); }
+  function stopSpeaking() { utteranceId++; stopAudio(); setMode("idle"); if (convMode) listenAgain(); else resumeListening(); }
 
   // ------------------------------------------------------------------ voice in
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null, listening = false, awaitingCommand = false, paused = false, awaitTimer = null, failures = 0;
+  let heard = false, convMisses = 0;
+  const END_PHRASES = /^(ok(ay)?[, ]+)?(stop( listening)?|goodbye|bye( bye)?|that'?s (all|it)|that is all|nothing else|no thanks|(thanks|thank you)( jarvis)?)[.!]*$/i;
   const wakeOn = () => wakeToggle.checked;
 
   function startRecognition(continuous) {
@@ -666,16 +686,31 @@
     rec.lang = navigator.language || "en-US";
     rec.continuous = continuous;
     rec.interimResults = true;
+    heard = false;
     rec.onresult = (e) => {
       failures = 0;
       const result = e.results[e.results.length - 1];
       const said = result[0].transcript.trim();
       if (!result.isFinal) { if (!continuous || awaitingCommand) live(`“${said}…”`); return; }
-      if (!continuous) { send(said); return; }
+      if (!continuous) {
+        heard = true;
+        if (convMode && END_PHRASES.test(said)) { setConv(false); speak("Very good. I'm here if you need me."); return; }
+        convMisses = 0;
+        send(said);
+        return;
+      }
       onWakeResult(said);
     };
     rec.onend = () => {
       listening = false;
+      if (convMode && !continuous) {
+        // Hands-free: if nothing was said, listen once more, then stop.
+        if (!heard && !busy && core.mode === "listening") {
+          if (++convMisses >= 2) { setConv(false); toast("Hands-free conversation ended (I didn't hear anything)."); }
+          else listenAgain();
+        }
+        return;
+      }
       const delay = Math.min(300 * 2 ** failures, 30000);  // back off if the mic keeps failing
       if (wakeOn() && !paused) setTimeout(() => { if (wakeOn() && !paused && !listening) startRecognition(true); }, delay);
       else if (core.mode === "listening") setMode("idle");
@@ -713,9 +748,37 @@
   function pauseListening() { paused = true; if (listening) stopRecognition(); }
   function resumeListening() { paused = false; if (wakeOn() && !listening) startRecognition(true); }
 
+  // ------------------------------------------------------------------ hands-free conversation
+  function listenAgain() {
+    setTimeout(() => {
+      if (convMode && !listening && !busy && core.mode !== "speaking" && core.mode !== "thinking") startRecognition(false);
+    }, 250);
+  }
+  function setConv(on) {
+    if (on && !Recognition) { toast(window.JARVIS_NO_VOICE_MSG || "Voice input needs Chrome, Edge or Safari.", true); return; }
+    convMode = on;
+    convMisses = 0;
+    $("convBtn").classList.toggle("on", on);
+    $("convBtn").setAttribute("aria-pressed", String(on));
+    if (on) {
+      utteranceId++;
+      stopAudio();
+      pauseListening();  // the wake word rests while we're talking
+      startRecognition(false);
+      toast('Hands-free on: just talk. Say "stop", or tap the waves button, to end.');
+    } else {
+      stopRecognition();
+      if (core.mode === "listening") setMode("idle"); else setMode(core.mode);
+      paused = false;
+      resumeListening();
+    }
+  }
+  $("convBtn").onclick = () => setConv(!convMode);
+  if (!Recognition) $("convBtn").hidden = true;
+
   function talkOrStop() {
     if (core.mode === "speaking") return stopSpeaking();
-    if (core.mode === "listening") { stopRecognition(); setMode("idle"); return; }
+    if (core.mode === "listening") { if (convMode) return setConv(false); stopRecognition(); setMode("idle"); return; }
     utteranceId++;
     stopAudio();
     startRecognition(false);
@@ -1014,9 +1077,9 @@
       ev.at = ev.at || new Date().toISOString();
       events.unshift(ev);
       unread++; $("bellCount").textContent = String(unread);
-      if (ev.kind === "briefing") {  // the morning briefing: show it as Jarvis speaking
+      if (ev.kind === "briefing" || ev.kind === "wrapup") {  // briefings: show them as Jarvis speaking
         addMsg("jarvis", ev.message);
-        toast("🌅 Your morning briefing is here.");
+        toast(ev.kind === "briefing" ? "🌅 Your morning briefing is here." : "🌙 Your evening wrap-up is here.");
       } else if (ev.kind === "routine" || ev.kind === "watch") {
         addMsg("jarvis", ev.message);
         toast(ev.kind === "routine" ? "🔁 A routine finished." : "🔎 A watcher has news.");
@@ -1136,6 +1199,9 @@
       $("opName").textContent = status.name || "Operator";
       $("opSub").textContent = status.mode === "demo" ? "Demo · in this page" : `${status.ai_name || "AI"} · ${status.mode} mode`;
       $("monitorWhere").textContent = status.mode === "demo" ? "Simulated" : status.computer_control ? "This computer" : "Server";
+      const gm = status.gmail || {};
+      $("gmailBtn").hidden = !gm.configured;
+      $("gmailBtn").textContent = gm.email ? `Gmail: ${gm.email} ✓ (disconnect)` : "Connect Gmail";
       const tg = status.telegram || {};
       $("telegramBtn").hidden = !tg.enabled;
       $("telegramBtn").textContent = tg.linked ? "Telegram linked ✓ (link again)" : "Link Telegram";

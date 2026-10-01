@@ -48,6 +48,7 @@ class Tool:
     local_only: bool = False
     needs_phone: bool = False
     needs_gemini: bool = False   # uses Google services beyond chat (pictures)
+    needs_gmail: bool = False    # only when Gmail is set up on the server
 
     def definition(self) -> dict[str, Any]:
         return {
@@ -106,6 +107,8 @@ def available_tools(settings: "Settings") -> list[Tool]:
             continue
         if t.needs_gemini and not settings.gemini_api_key:
             continue
+        if t.needs_gmail and not settings.gmail_configured:
+            continue
         tools.append(t)
     return tools
 
@@ -113,5 +116,5 @@ def available_tools(settings: "Settings") -> list[Tool]:
 def load_all() -> None:
     # Importing the modules runs their @tool decorators.
     from jarvis.tools import (  # noqa: F401
-        automations, calls, computer, extras, library, memory, notes, pictures, reminders, web,
+        automations, calls, computer, device, extras, library, mail, memory, notes, pictures, reminders, web,
     )

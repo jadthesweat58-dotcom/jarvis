@@ -16,6 +16,11 @@ Jarvis is your own AI assistant, powered by Google Gemini (or Claude, if you pre
 - 📈 **Live ticker**: prices, football scores and headlines across the dashboard
 - 📚 **Second brain**: every file you share is saved to a searchable library
 - 🎨 **Pictures**: "make me a poster of…", "turn this photo into a cartoon"
+- 🌙 **Evening wrap-up**: what you got done, what's left, tomorrow's plan, and a gentle nudge
+- 📧 **Gmail** (optional): "any important emails today?", draft replies, send with your approval
+- 🎙️ **Hands-free conversation**: talk back and forth without pressing anything
+- 🖥️ **On your computer**: music, volume, brightness, Do Not Disturb, lock screen, WhatsApp
+  messages, and a menu-bar icon that starts with your Mac
 - 📞 **Phone calls**: Jarvis can call or text **you**, and call **other people** for you (it
   delivers a message, chats with them and reports back). You can also **phone Jarvis** and talk.
 - 💻 **Control your computer** (when running on your own machine): open apps and websites, run
@@ -146,6 +151,18 @@ Google Calendar → ⚙ Settings → click your calendar on the left → **Integ
 in the morning briefing, and Jarvis can answer "what's on my calendar this week?". Outlook and
 iCloud calendars work too with their published .ics link. Treat the link like a password.
 
+## Evening wrap-up
+
+Every evening at **21:00** (`WRAPUP_TIME`, or `off`) Jarvis sends a short wrap-up: what you
+finished today, what's still open, a kind nudge about important tasks that have waited 3+ days,
+and tomorrow's reminders and calendar. Ask any time: *"How did my day go?"* / *"What's tomorrow?"*
+
+## Hands-free conversation
+
+Tap the **waves** button next to Send and just talk: Jarvis answers, then listens again by itself.
+Say *"stop"*, *"that's all"* or *"thanks Jarvis"* to end, or tap the button. It also ends after two
+silences. Tap **Talk** while Jarvis is speaking to cut it short. (Chrome, Edge or Safari.)
+
 ## Routines and watchers
 
 - **Routines** are jobs Jarvis does on its own and sends you: *"Every Friday at 6pm, find fun
@@ -176,6 +193,46 @@ iCloud calendars work too with their published .ics link. Treat the link like a 
   Send a photo and ask *"turn this into a cartoon"*. Pictures show in the chat (and on Telegram);
   the newest 40 are kept. Uses Google's image model on your Gemini key and costs a few cents each
   (`IMAGE_MODEL` can pick a specific model).
+
+## Gmail (optional, one-time Google setup)
+
+Jarvis uses your **own** Google Cloud app, so your mail goes only between Google and your Jarvis.
+1. Go to https://console.cloud.google.com, sign in, and **create a project** (e.g. "Jarvis").
+2. **APIs & Services → Library** → search **Gmail API** → **Enable**.
+3. **APIs & Services → OAuth consent screen** (Google Auth Platform): app name "Jarvis", your
+   email, **External**. Under **Audience**, add your Gmail address as a **test user**, then click
+   **Publish app** (otherwise Google logs Jarvis out every 7 days). You don't need to submit it
+   for verification.
+4. **Clients → Create client → Web application**. Under **Authorized redirect URIs** add
+   `https://jarvis-hzqs.onrender.com/google/callback` (and `http://localhost:8000/google/callback`
+   for your computer). Create, then copy the **Client ID** and **Client secret**.
+5. Render → your service → **Environment**: add `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`
+   (never paste them in a chat). Save; Render restarts.
+6. In Jarvis: gear ⚙ → **Connect Gmail** → sign in → Google warns the app isn't verified (it's
+   yours): **Advanced → Go to Jarvis** → **Allow**.
+
+Then: *"Any important emails today?"*, *"Read the one from the bank"*, *"Draft a reply saying
+I'll pay Friday"*, *"Send it"* (you approve every email). The morning briefing mentions important
+unread mail. Disconnect any time from the same menu.
+
+## On your own computer: Mac controls, WhatsApp, start at login
+
+With `JARVIS_MODE=local`, Jarvis can also:
+- **Music:** *"pause the music"*, *"next song"*, *"what's playing?"* (Spotify or Apple Music)
+- **Volume and brightness:** *"volume 30"*, *"mute"*, *"brightness down"*
+- **Do Not Disturb:** in the Shortcuts app, make two shortcuts named **Jarvis Focus On** and
+  **Jarvis Focus Off**, each with the action *Set Focus* (Do Not Disturb on / off). Then
+  *"turn on do not disturb"*. Jarvis can also run any other Shortcut you name (you approve it).
+- **Lock the screen**, and **empty the Trash** (you approve it)
+- **WhatsApp:** *"WhatsApp Ahmed: running 10 minutes late"*. You approve it; it opens WhatsApp with
+  the message and presses Enter. Uses saved contacts or +971… numbers.
+- The first time, macOS asks to let Terminal/Python control your Mac: **System Settings →
+  Privacy & Security → Accessibility** (and **Automation**) → allow it.
+
+**Start with your Mac:** double-click `scripts/autostart.command` once (Windows:
+`scripts\autostart.bat`). Jarvis then starts at login with an icon in the menu bar (Windows: by
+the clock): **Open Jarvis**, **Listen for claps**, **Hear today's briefing**, **Quit**. Undo with
+`./scripts/autostart.command off`. Logs: `~/Library/Logs/Jarvis.log`.
 
 ## Usage meter and backup
 
@@ -267,6 +324,8 @@ See `.env.example` for all of them. The main ones:
 | `JARVIS_FILES_ROOT` | The only folder Jarvis may read/write in local mode (default: your home folder) |
 | `CALENDAR_ICS_URL` | Your calendar's secret iCal link(s), comma-separated (optional) |
 | `TELEGRAM_BOT_TOKEN` | Bot token from @BotFather, to chat with Jarvis on Telegram (optional) |
+| `WRAPUP_TIME` | Evening wrap-up time (default `21:00`), or `off` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Your Google OAuth client, for Gmail (optional) |
 
 ## Safety notes
 
@@ -303,6 +362,9 @@ jarvis/
   library.py      the searchable document library
   images.py       pictures Jarvis makes
   google_ai.py    Gemini embeddings and picture generation
+  wrapup.py       evening wrap-up
+  gmail.py        Gmail (OAuth, read, draft, send)
+  tray.py         menu-bar / tray app; autostart.py starts it at login
   safeurl.py      safe fetching of web pages
   phone.py        Twilio calls & texts
   scheduler.py    fires reminders

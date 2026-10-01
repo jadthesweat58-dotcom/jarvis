@@ -93,7 +93,7 @@ def list_todos(ctx: Context, args: dict) -> str:
 
 @tool("complete_todo", "Mark a to-do as done.", {"id": {"type": "integer"}}, ["id"])
 def complete_todo(ctx: Context, args: dict) -> str:
-    if not ctx.db.execute("UPDATE todos SET done = 1 WHERE id = ?", (args["id"],)):
+    if not ctx.db.execute("UPDATE todos SET done = 1, done_at = ? WHERE id = ?", (utcnow(), args["id"])):
         raise ToolError(f"No to-do #{args['id']}.")
     return f"Marked to-do #{args['id']} as done."
 
@@ -106,5 +106,17 @@ def complete_todo(ctx: Context, args: dict) -> str:
 )
 def get_briefing_data(ctx: Context, args: dict) -> str:
     from jarvis.briefing import as_text, gather
+
+    return as_text(gather(ctx))
+
+
+@tool(
+    "get_wrapup_data",
+    "The evening wrap-up facts: tasks finished today, what's still open, important tasks that have "
+    "waited for days, and tomorrow's reminders and calendar. Use for 'how did my day go', 'what's "
+    "tomorrow', or 'give me my wrap-up'.",
+)
+def get_wrapup_data(ctx: Context, args: dict) -> str:
+    from jarvis.wrapup import as_text, gather
 
     return as_text(gather(ctx))

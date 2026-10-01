@@ -146,39 +146,79 @@ def open_jarvis(url: str, name: str, briefing: bool = True, token: str = "") -> 
             say(text)
 
 
+class ClapListener:
+    """Listens to the microphone in the background and calls ``on_double_clap``.
+    Used by ``run`` below and by the menu-bar app (jarvis/tray.py)."""
+
+    def __init__(self, on_double_clap, sensitivity: int = 5, on_level=None):
+        import sounddevice as sd  # ImportError / OSError if the microphone packages are missing
+
+        self.detector = ClapDetector(sensitivity)
+        self.on_double_clap = on_double_clap
+        self.on_level = on_level
+        self._sd = sd
+        self._stream = None
+
+    @property
+    def running(self) -> bool:
+        return self._stream is not None
+
+    def _audio(self, indata, frames, time_info, status) -> None:
+        block = indata[:, 0]
+        if self.on_level:
+            self.on_level(block)
+        if self.detector.feed(block, time.monotonic()):
+            # Off the audio thread: opening Jarvis and fetching the briefing take a moment.
+            threading.Thread(target=self.on_double_clap, daemon=True).start()
+
+    def start(self) -> None:
+        if self._stream is None:
+            stream = self._sd.InputStream(channels=1, samplerate=SAMPLE_RATE, blocksize=BLOCK, callback=self._audio)
+            stream.start()
+            self._stream = stream
+
+    def stop(self) -> None:
+        if self._stream is not None:
+            self._stream.stop()
+            self._stream.close()
+            self._stream = None
+
+
+def settings_from_env() -> tuple[str, int, bool]:
+    url = os.environ.get("JARVIS_URL", "http://localhost:8000").strip()
+    sensitivity = int(os.environ.get("CLAP_SENSITIVITY", "5") or 5)
+    briefing = os.environ.get("CLAP_BRIEFING", "on").strip().lower() not in ("off", "0", "no", "false")
+    return url, sensitivity, briefing
+
+
 def run(test: bool = False, levels: bool = False) -> None:
     try:
-        import sounddevice as sd
+        import sounddevice  # noqa: F401
     except (ImportError, OSError):
         sys.exit("Clap-to-open needs the microphone packages. Run:\n"
                  "    pip install -r requirements-local.txt\n"
                  "(On Linux, also install PortAudio: sudo apt install libportaudio2)")
     from jarvis.config import settings
 
-    url = os.environ.get("JARVIS_URL", "http://localhost:8000").strip()
-    sensitivity = int(os.environ.get("CLAP_SENSITIVITY", "5") or 5)
-    briefing = os.environ.get("CLAP_BRIEFING", "on").strip().lower() not in ("off", "0", "no", "false")
-    detector = ClapDetector(sensitivity)
+    url, sensitivity, briefing = settings_from_env()
+
+    def clapped() -> None:
+        if test:
+            print("\nClap clap! (test mode: not opening Jarvis)")
+        else:
+            print("\nClap clap! Opening Jarvis…")
+            open_jarvis(url, settings.my_name, briefing, settings.access_token)
+
+    def show_level(block) -> None:
+        bar = "#" * int(min(float(np.max(np.abs(block))), 1.0) * 50)
+        print(f"\r{bar:<50}", end="", flush=True)
+
     print(f"Listening for a double clap (sensitivity {sensitivity}). Press Ctrl+C to stop.")
-
-    def on_audio(indata, frames, time_info, status):
-        block = indata[:, 0]
-        if levels:
-            bar = "#" * int(min(float(np.max(np.abs(block))), 1.0) * 50)
-            print(f"\r{bar:<50}", end="", flush=True)
-        if detector.feed(block, time.monotonic()):
-            if test:
-                print("\nClap clap! (test mode: not opening Jarvis)")
-            else:
-                print("\nClap clap! Opening Jarvis…")
-                # Off the audio thread: the briefing can take a few seconds to arrive.
-                threading.Thread(target=open_jarvis, daemon=True,
-                                 args=(url, settings.my_name, briefing, settings.access_token)).start()
-
     try:
-        with sd.InputStream(channels=1, samplerate=SAMPLE_RATE, blocksize=BLOCK, callback=on_audio):
-            while True:
-                time.sleep(0.5)
+        listener = ClapListener(clapped, sensitivity, on_level=show_level if levels else None)
+        listener.start()
+        while True:
+            time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nStopped listening.")
     except Exception as exc:  # no microphone, permission denied, …

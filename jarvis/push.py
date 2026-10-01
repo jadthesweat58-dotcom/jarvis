@@ -21,9 +21,9 @@ from jarvis.tools import Context
 log = logging.getLogger("jarvis.push")
 
 # Notifier events worth waking your phone for.
-PUSH_KINDS = {"reminder", "briefing", "call", "error", "routine", "watch"}
+PUSH_KINDS = {"reminder", "briefing", "call", "error", "routine", "watch", "wrapup"}
 TITLES = {"reminder": "⏰ Reminder", "briefing": "🌅 Morning briefing", "call": "📞 Phone call", "error": "⚠️ Jarvis",
-          "routine": "🔁 Routine", "watch": "🔎 Watcher"}
+          "routine": "🔁 Routine", "watch": "🔎 Watcher", "wrapup": "🌙 Evening wrap-up"}
 _key_lock = threading.Lock()
 
 

@@ -95,13 +95,15 @@ def test_listener_opens_jarvis_on_double_clap(monkeypatch):
         def __init__(self, channels, samplerate, blocksize, callback):
             self.callback, self.blocksize = callback, blocksize
 
-        def __enter__(self):
+        def start(self):
             for i in range(0, len(audio) - self.blocksize + 1, self.blocksize):
                 self.callback(audio[i:i + self.blocksize].reshape(-1, 1), self.blocksize, None, None)
-            return self
 
-        def __exit__(self, *exc):
-            return False
+        def stop(self):
+            pass
+
+        def close(self):
+            pass
 
     monkeypatch.setitem(sys.modules, "sounddevice", types.SimpleNamespace(InputStream=FakeStream))
     clock = iter(np.arange(0, 10, BLOCK / SAMPLE_RATE))

@@ -4,3 +4,6 @@ numpy>=1.26
 sounddevice>=0.4
 mss>=9.0
 pillow>=10.0
+
+# The menu-bar / tray app (start Jarvis at login)
+pystray>=0.19

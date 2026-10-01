@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS todos (
     due TEXT,
     priority TEXT NOT NULL DEFAULT 'med',  -- high | med | low
     done INTEGER NOT NULL DEFAULT 0,
+    done_at TEXT,                      -- when it was ticked off (UTC ISO)
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS reminders (
@@ -142,6 +143,7 @@ CREATE TABLE IF NOT EXISTS phone_calls (
 MIGRATIONS = [
     "ALTER TABLE todos ADD COLUMN priority TEXT NOT NULL DEFAULT 'med'",
     "ALTER TABLE reminders ADD COLUMN repeat_rule TEXT",
+    "ALTER TABLE todos ADD COLUMN done_at TEXT",
 ]
 
 
