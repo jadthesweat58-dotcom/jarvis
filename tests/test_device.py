@@ -92,13 +92,24 @@ def test_whatsapp_sends_to_a_contact(ctx, mac):
     REGISTRY["add_contact"].handler(ctx, {"name": "Ahmed", "phone": "+971501234567"})
     args = REGISTRY["send_whatsapp"].prepare(ctx, {"to": "ahmed", "message": "Running 10 min late & sorry!"})
     assert args["number"] == "+971501234567"
+    mac.answers['contains "WhatsApp"'] = (0, "true")
+    mac.answers["frontmost is true"] = (0, "WhatsApp")
     assert REGISTRY["send_whatsapp"].describe(ctx, args) == 'WhatsApp Ahmed (+971501234567): "Running 10 min late & sorry!"'
     assert run(ctx, "send_whatsapp", **args) == "Sent your WhatsApp message to Ahmed."
     assert ["open", "whatsapp://send?phone=971501234567&text=Running%2010%20min%20late%20%26%20sorry%21"] in mac.calls
     assert "key code 36" in scripts(mac)[-1]
 
 
+def test_whatsapp_from_cold_start_leaves_it_typed(ctx, mac):
+    """If WhatsApp wasn't open, another chat might be showing: never press Enter blindly."""
+    mac.answers['contains "WhatsApp"'] = (0, "false")
+    out = run(ctx, "send_whatsapp", to="+971501234567", number="+971501234567", message="hi")
+    assert out.endswith("press Enter to send it.") and not any("key code 36" in x for x in scripts(mac))
+
+
 def test_whatsapp_without_accessibility_leaves_it_typed(ctx, mac):
+    mac.answers['contains "WhatsApp"'] = (0, "true")
+    mac.answers["frontmost is true"] = (0, "WhatsApp")
     mac.answers["key code 36"] = (1, "", "not allowed to send keystrokes (1002)")
     out = run(ctx, "send_whatsapp", to="+971501234567", number="+971501234567", message="hi")
     assert "press Enter to send it" in out and "Accessibility" in out

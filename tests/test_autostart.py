@@ -57,3 +57,14 @@ def test_tray_reuses_a_running_server(monkeypatch):
     app = tray.Jarvis()
     app.start_server()
     assert app.server is None
+
+
+def test_mac_agent_has_a_usable_path(tmp_path):
+    data = plistlib.loads(autostart.mac_plist(home=tmp_path))
+    assert "/opt/homebrew/bin" in data["EnvironmentVariables"]["PATH"]
+
+
+def test_only_one_tray_at_a_time():
+    port = 47999
+    assert tray.single_instance(port) is True
+    assert tray.single_instance(port) is False

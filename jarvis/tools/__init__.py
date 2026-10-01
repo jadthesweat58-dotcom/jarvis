@@ -69,7 +69,8 @@ class Tool:
     def describe(self, ctx: Context, args: dict) -> str:
         if self.summarize:
             return self.summarize(ctx, args)
-        return f"{self.name}({args})"
+        details = ", ".join(f"{k}: {str(v)[:300]}" for k, v in args.items())
+        return f"{self.name.replace('_', ' ')}" + (f" ({details})" if details else "")
 
 
 REGISTRY: dict[str, Tool] = {}

@@ -42,6 +42,9 @@ log = logging.getLogger("jarvis.server")
 STATIC = Path(__file__).parent / "static"
 LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 HANGUP = "[HANGUP]"
+PHONE_BLOCKED = {"check_email", "read_email", "draft_email", "send_email", "search_library", "list_library",
+                 "save_webpage", "read_file", "list_files", "write_file", "look_at_screen", "run_command",
+                 "send_whatsapp", "empty_trash", "run_shortcut"}
 
 
 class FileIn(BaseModel):
@@ -638,8 +641,9 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
 
     @app.post("/api/todos/{todo_id}", dependencies=[Depends(require_user)])
     def set_task_done(todo_id: int, body: DoneIn) -> dict[str, bool]:
-        if not ctx.db.execute("UPDATE todos SET done = ?, done_at = ? WHERE id = ?",
-                              (int(body.done), utcnow() if body.done else None, todo_id)):
+        # Keep the first completion time, so re-ticking yesterday's task doesn't count it today.
+        if not ctx.db.execute("UPDATE todos SET done = ?, done_at = CASE WHEN ? = 1 THEN COALESCE(done_at, ?) END "
+                              "WHERE id = ?", (int(body.done), int(body.done), utcnow(), todo_id)):
             raise HTTPException(404, "No such task.")
         return {"ok": True}
 
@@ -728,7 +732,9 @@ def create_app(ctx: Context | None = None, brain_factory: Callable[..., Brain] |
         if call["id"] not in call_brains:
             conv = f"call-{call['id']}"
             if call["with_owner"]:
-                call_brains[call["id"]] = make_brain(conversation_id=conv, voice=True, effort="low")
+                # Caller ID can be faked, so phone calls never get mail, files, the library or the screen.
+                phone_tools = [t for t in available_tools(ctx.settings) if t.name not in PHONE_BLOCKED]
+                call_brains[call["id"]] = make_brain(conversation_id=conv, voice=True, effort="low", tools=phone_tools)
             else:
                 call_brains[call["id"]] = make_brain(
                     conversation_id=conv, tools=[], web_search=False, remember_facts=False,

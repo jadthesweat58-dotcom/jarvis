@@ -289,6 +289,13 @@ def empty_trash(ctx: Context, args: dict) -> str:
 
 
 # ------------------------------------------------------------------ WhatsApp
+def _whatsapp_running() -> bool:
+    try:
+        return osascript('tell application "System Events" to (name of processes) contains "WhatsApp"') == "true"
+    except ToolError:
+        return False
+
+
 def _freeze_whatsapp(ctx: Context, args: dict) -> dict:
     from jarvis.tools.calls import find_contact
 
@@ -320,17 +327,24 @@ def send_whatsapp(ctx: Context, args: dict) -> str:
     app_link = f"whatsapp://send?phone={digits}&text={text}"
     web_link = f"https://web.whatsapp.com/send?phone={digits}&text={text}"
     os_name = system()
+    typed = f"The message to {args.get('to')} is typed in WhatsApp; press Enter to send it."
     if os_name == "Darwin":
+        was_running = _whatsapp_running()
         if run(["open", app_link]).returncode != 0:
             webbrowser.open(web_link)
             return f"Opened WhatsApp Web with the message to {args.get('to')}; press Enter to send it."
-        time.sleep(3)  # let WhatsApp open the chat with the message typed in
+        if not was_running:
+            # Starting from cold, WhatsApp may still be loading or showing another chat:
+            # pressing Enter then could send something else to someone else.
+            return typed
+        time.sleep(3)  # let WhatsApp switch to the chat with the message typed in
         try:
-            osascript('tell application "WhatsApp" to activate\ndelay 0.5\n'
-                      'tell application "System Events" to key code 36')  # Return
+            front = osascript('tell application "System Events" to get name of first process whose frontmost is true')
+            if front != "WhatsApp":
+                return typed
+            osascript('tell application "System Events" to tell process "WhatsApp" to key code 36')  # Return
         except ToolError:
-            return (f"The message to {args.get('to')} is typed in WhatsApp; press Enter to send it. "
-                    f"(To let Jarvis press Enter for you: {ACCESSIBILITY_HELP})")
+            return f"{typed} (To let Jarvis press Enter for you: {ACCESSIBILITY_HELP})"
         return f"Sent your WhatsApp message to {args.get('to')}."
     if os_name == "Windows":
         import os
@@ -340,12 +354,8 @@ def send_whatsapp(ctx: Context, args: dict) -> str:
         except OSError:
             webbrowser.open(web_link)
             return f"Opened WhatsApp Web with the message to {args.get('to')}; press Enter to send it."
-        time.sleep(3)
-        try:
-            powershell("$w = New-Object -ComObject WScript.Shell; if ($w.AppActivate('WhatsApp')) "
-                       "{ Start-Sleep -Milliseconds 500; $w.SendKeys('~') } else { exit 1 }")
-        except ToolError:
-            return f"The message to {args.get('to')} is typed in WhatsApp; press Enter to send it."
-        return f"Sent your WhatsApp message to {args.get('to')}."
+        # Windows can't safely tell which window would get the Enter key (a browser tab
+        # called "WhatsApp" could), so the last step is the user's.
+        return typed
     webbrowser.open(web_link)
     return f"Opened WhatsApp Web with the message to {args.get('to')}; press Enter to send it."

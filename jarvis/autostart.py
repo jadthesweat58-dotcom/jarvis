@@ -15,6 +15,7 @@ import platform
 import plistlib
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 LABEL = "com.jarvis.assistant"
@@ -43,6 +44,8 @@ def mac_plist(home: Path | None = None) -> bytes:
         "RunAtLoad": True,
         "KeepAlive": {"SuccessfulExit": False},  # restart after a crash, not after "Quit Jarvis"
         "ProcessType": "Interactive",
+        # Login items start with a bare PATH; add the usual places for Homebrew and system tools.
+        "EnvironmentVariables": {"PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"},
         "StandardOutPath": log,
         "StandardErrorPath": log,
     })
@@ -72,12 +75,18 @@ def install() -> str:
         path.write_bytes(mac_plist())
         domain = f"gui/{os.getuid()}"
         subprocess.run(["launchctl", "bootout", domain, str(path)], capture_output=True)
-        subprocess.run(["launchctl", "bootstrap", domain, str(path)], capture_output=True, check=True)
+        for attempt in range(5):  # right after "bootout" the old copy may still be shutting down
+            done = subprocess.run(["launchctl", "bootstrap", domain, str(path)], capture_output=True, text=True)
+            if done.returncode == 0:
+                break
+            time.sleep(1)
+        else:
+            raise SystemExit(f"Couldn't start Jarvis at login: {done.stderr.strip()}")
         return "Jarvis will now start when you log in, and is starting now (look for its icon in the menu bar)."
     if system == "Windows":
         path = windows_startup_file()
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(windows_launcher(), encoding="utf-8")
+        path.write_text(windows_launcher(), encoding="utf-16")  # Windows Script Host reads UTF-16, not UTF-8
         os.startfile(str(path))  # type: ignore[attr-defined]
         return "Jarvis will now start when you sign in, and is starting now (look for its icon by the clock)."
     path = linux_desktop_file()

@@ -44,6 +44,17 @@ relevant. Plain text, under 200 words."""
 
 CLAUDE_IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 
+# Tools that bring outside text (written by strangers) into the conversation. Such text can
+# hide instructions ("now open https://evil/?data=…"). Once one has run in a turn, every
+# other tool needs the user's approval, except harmless lookups that can't send anything
+# out or change anything.
+UNTRUSTED_SOURCES = {"check_email", "read_email", "read_webpage", "save_webpage"}
+SAFE_AFTER_UNTRUSTED = {
+    "check_email", "read_email", "web_search", "calculate", "convert_currency", "world_time", "prayer_times", "get_weather",
+    "market_quote", "list_todos", "list_reminders", "list_routines", "list_watchers", "list_library",
+    "get_wrapup_data", "media_control", "set_volume", "set_brightness", "lock_screen",
+}
+
 # approver(tool, args, summary) -> True to run the tool, False to decline.
 Approver = Callable[[Tool, dict, str], bool]
 
@@ -158,6 +169,8 @@ class Brain:
         self.remember_facts = remember_facts
         self._lock = threading.Lock()
         self._usage: dict[str, int] = {}
+        self._untrusted_seen = False   # outside text (email, web page) read in this turn
+        self._turn_text = ""
         self._usage_lock = threading.Lock()
         self.messages: list[dict] = ctx.db.load_conversation(conversation_id)
         if ctx.vision is None:
@@ -177,6 +190,8 @@ class Brain:
                     text = f"{text}\n\n<my_screen_right_now>\n{seen}\n</my_screen_right_now>"
                 if attachment:
                     text = self._attach(text, *attachment)
+                self._untrusted_seen = False
+                self._turn_text = text
                 return self._chat(text)
             finally:
                 self._flush_usage()
@@ -367,10 +382,13 @@ class Brain:
         try:
             if tool is None:
                 raise ToolError(f"Unknown tool {name}.")
-            if tool.requires_approval(self.ctx, args):
+            guarded = self._guarded(name, args)
+            if guarded or tool.requires_approval(self.ctx, args):
                 if tool.prepare:
                     args = tool.prepare(self.ctx, args)  # freeze details, e.g. the exact number
                 summary = tool.describe(self.ctx, args)
+                if guarded:
+                    summary = f"⚠️ After reading an email or web page, Jarvis wants to: {summary}"
                 if self.approver is not None:
                     output = tool.handler(self.ctx, args) if self.approver(tool, args, summary) \
                         else "The user declined this action."
@@ -385,12 +403,25 @@ class Brain:
                               "don't call this tool again for it.")
             else:
                 output = tool.handler(self.ctx, args)
+            if name in UNTRUSTED_SOURCES or (name == "get_briefing_data" and self.settings.gmail_configured):
+                self._untrusted_seen = True
             return output or "(no output)", False
         except ToolError as exc:
             return str(exc), True
         except Exception as exc:
             log.exception("Tool %s failed", name)
             return f"The tool failed: {type(exc).__name__}: {exc}", True
+
+    def _guarded(self, name: str, args: dict) -> bool:
+        """True when this call must be approved because outside text was read earlier in
+        the turn (and it isn't a harmless lookup, or a page the user asked for by address)."""
+        if not self._untrusted_seen or name in SAFE_AFTER_UNTRUSTED:
+            return False
+        if name in ("read_webpage", "save_webpage"):
+            url = str(args.get("url", "")).strip()
+            if url and url in self._turn_text:
+                return False
+        return True
 
     def _save(self) -> None:
         self.ctx.db.save_conversation(self.conversation_id, self.messages)

@@ -595,7 +595,7 @@
   // Replies are spoken by ElevenLabs when the server has it set up, otherwise by the
   // browser's own voice. ElevenLabs audio plays through Web Audio: once the page has
   // been tapped, Safari allows it to play later (after the reply arrives).
-  let audioCtx = null, playing = null, elevenFailed = false;
+  let audioCtx = null, playing = null, playingDone = null, elevenFailed = false;
   function getAudioCtx() {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!audioCtx && Ctx) audioCtx = new Ctx();
@@ -609,6 +609,8 @@
   }
   function stopAudio() {
     if (playing) { playing.onended = null; try { playing.stop(); } catch { /* not started */ } playing = null; }
+    // Let whoever was waiting for the voice to finish carry on (else the chat stays "busy").
+    if (playingDone) { const done = playingDone; playingDone = null; done(); }
     if (voiceOut) speechSynthesis.cancel();
   }
 
@@ -650,7 +652,8 @@
       playing = c.createBufferSource();
       playing.buffer = buffer;
       playing.connect(c.destination);
-      playing.onended = () => { playing = null; finish(id, resolve); };
+      playingDone = resolve;
+      playing.onended = () => { playing = null; playingDone = null; finish(id, resolve); };
       playing.start();
     });
   }

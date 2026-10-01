@@ -16,6 +16,20 @@ def _gmail(ctx: Context):
     return gmail
 
 
+def _exact_recipients(ctx: Context, args: dict) -> dict:
+    """Show (and use) exactly the addresses the email goes to, so a name like
+    "Boss <someone-else@example.com>" can't hide the real recipient."""
+    from email.utils import getaddresses
+
+    addresses = [a for _, a in getaddresses([str(args.get("to", ""))]) if "@" in a]
+    if not addresses:
+        raise ToolError("I need a valid email address to write to.")
+    out = {**args, "to": ", ".join(addresses)}
+    if args.get("reply_to_id"):
+        out["replying_to"] = _call(_gmail(ctx).read, ctx, str(args["reply_to_id"]))["subject"]
+    return out
+
+
 def _call(fn, *args):
     from jarvis.gmail import GmailError
 
@@ -53,8 +67,9 @@ def check_email(ctx: Context, args: dict) -> str:
 def read_email(ctx: Context, args: dict) -> str:
     gmail = _gmail(ctx)
     m = _call(gmail.read, ctx, str(args["id"]))
+    body = (m["body"] or "(no text)").replace("</email_body", "< /email_body")  # can't close the wrapper early
     return (f"{UNTRUSTED}\nFrom: {m['from']}\nTo: {m['to']}\nDate: {m['date']}\nSubject: {m['subject']}\n\n"
-            f"<email_body>\n{m['body'] or '(no text)'}\n</email_body>")
+            f"<email_body>\n{body}\n</email_body>")
 
 
 @tool(
@@ -88,8 +103,12 @@ def draft_email(ctx: Context, args: dict) -> str:
     ["to", "body"],
     needs_gmail=True,
     needs_approval=True,
-    summarize=lambda ctx, a: (f"Email {a.get('to', '')}" + (f" — \"{a['subject']}\"" if a.get("subject") else
-                              " (reply)" if a.get("reply_to_id") else "") + f": {str(a.get('body', ''))[:400]}"),
+    prepare=lambda ctx, a: _exact_recipients(ctx, a),
+    summarize=lambda ctx, a: (f"Send an email to {a.get('to', '')}"
+                              + (f" (reply to \"{a['replying_to']}\")" if a.get("replying_to") else "")
+                              + (f"\nSubject: {a['subject']}" if a.get("subject") else "")
+                              + f"\n\n{str(a.get('body', ''))[:3000]}"
+                              + ("\n[…longer than shown]" if len(str(a.get("body", ""))) > 3000 else "")),
 )
 def send_email(ctx: Context, args: dict) -> str:
     gmail = _gmail(ctx)

@@ -211,6 +211,10 @@ Jarvis uses your **own** Google Cloud app, so your mail goes only between Google
 6. In Jarvis: gear ⚙ → **Connect Gmail** → sign in → Google warns the app isn't verified (it's
    yours): **Advanced → Go to Jarvis** → **Allow**.
 
+**Safety:** emails and web pages are written by other people and can contain hidden instructions.
+After Jarvis reads one, anything else it wants to do in that turn (open a link, save something,
+draft a reply…) shows an **Approve** button first. Phone calls to Jarvis never get your email.
+
 Then: *"Any important emails today?"*, *"Read the one from the bank"*, *"Draft a reply saying
 I'll pay Friday"*, *"Send it"* (you approve every email). The morning briefing mentions important
 unread mail. Disconnect any time from the same menu.
@@ -224,8 +228,10 @@ With `JARVIS_MODE=local`, Jarvis can also:
   **Jarvis Focus Off**, each with the action *Set Focus* (Do Not Disturb on / off). Then
   *"turn on do not disturb"*. Jarvis can also run any other Shortcut you name (you approve it).
 - **Lock the screen**, and **empty the Trash** (you approve it)
-- **WhatsApp:** *"WhatsApp Ahmed: running 10 minutes late"*. You approve it; it opens WhatsApp with
-  the message and presses Enter. Uses saved contacts or +971… numbers.
+- **WhatsApp:** *"WhatsApp Ahmed: running 10 minutes late"*. You approve it; it opens WhatsApp on
+  that chat with the message typed in. If WhatsApp was already open on your Mac, Jarvis presses
+  Enter for you; otherwise (and on Windows) you press Enter, so a message can never go to the
+  wrong chat while WhatsApp is still loading. Uses saved contacts or +971… numbers.
 - The first time, macOS asks to let Terminal/Python control your Mac: **System Settings →
   Privacy & Security → Accessibility** (and **Automation**) → allow it.
 

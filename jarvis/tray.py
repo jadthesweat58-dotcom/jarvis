@@ -50,6 +50,16 @@ class Jarvis:
                                 timeout_graceful_shutdown=3, log_level="warning")
         self.server = uvicorn.Server(config)
         threading.Thread(target=self.server.run, name="jarvis-server", daemon=True).start()
+        threading.Thread(target=self._check_started, daemon=True).start()
+
+    def _check_started(self) -> None:
+        import time
+
+        for _ in range(60):
+            if port_in_use(self.port):
+                return
+            time.sleep(0.5)
+        self.notify("Jarvis's server didn't start. Check ~/Library/Logs/Jarvis.log (or run scripts/start.sh).")
 
     # --- clapping ---------------------------------------------------------------
     def clapped(self) -> None:
@@ -121,7 +131,13 @@ class Jarvis:
             import pystray
             from PIL import Image
         except ImportError:
-            sys.exit("The menu-bar app needs its packages. Run: pip install -r requirements-local.txt")
+            # Exit "successfully" so the start-at-login service doesn't keep restarting it.
+            log.error("The menu-bar app needs its packages. Run: pip install -r requirements-local.txt")
+            sys.exit(0)
+        if not single_instance():
+            log.info("Jarvis is already running in the menu bar.")
+            webbrowser.open(self.url)
+            sys.exit(0)
         self.start_server()
         if os.environ.get("CLAP_ON_START", "on").strip().lower() not in ("off", "0", "no", "false"):
             self.toggle_clap()
@@ -129,8 +145,27 @@ class Jarvis:
         self.icon.run()
 
 
+_instance_lock = None
+
+
+def single_instance(port: int = 47863) -> bool:
+    """True for the first copy of the menu-bar app; a second copy finds the port taken."""
+    global _instance_lock
+    lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        lock.bind(("127.0.0.1", port))
+    except OSError:
+        lock.close()
+        return False
+    _instance_lock = lock  # held for as long as the app runs
+    return True
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s")
+    # Web libraries log full addresses at INFO, and some carry secrets (bot token, calendar link).
+    for noisy in ("httpx", "httpcore", "urllib3"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
     Jarvis().run()
 
 

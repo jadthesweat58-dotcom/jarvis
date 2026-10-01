@@ -93,7 +93,8 @@ def list_todos(ctx: Context, args: dict) -> str:
 
 @tool("complete_todo", "Mark a to-do as done.", {"id": {"type": "integer"}}, ["id"])
 def complete_todo(ctx: Context, args: dict) -> str:
-    if not ctx.db.execute("UPDATE todos SET done = 1, done_at = ? WHERE id = ?", (utcnow(), args["id"])):
+    if not ctx.db.execute("UPDATE todos SET done = 1, done_at = COALESCE(done_at, ?) WHERE id = ?",
+                          (utcnow(), args["id"])):
         raise ToolError(f"No to-do #{args['id']}.")
     return f"Marked to-do #{args['id']} as done."
 

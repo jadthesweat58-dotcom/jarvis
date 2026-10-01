@@ -15,6 +15,7 @@ import base64
 import hashlib
 import html
 import hmac
+import re
 import secrets
 import threading
 import time
@@ -97,7 +98,7 @@ def disconnect(ctx: Context) -> None:
     token = _refresh_token(ctx)
     if token:
         try:
-            http.post(REVOKE_URL, params={"token": token})
+            http.post(REVOKE_URL, data={"token": token})  # in the body: never in a logged URL
         except Exception:
             pass  # forgetting it locally is what matters
     ctx.db.set_kv("gmail_refresh", "")
@@ -198,7 +199,14 @@ def _body(payload: dict) -> str:
     return ""
 
 
+def _check_id(message_id: str) -> str:
+    if not re.fullmatch(r"[0-9A-Za-z]{1,40}", str(message_id or "")):
+        raise GmailError("That isn't a valid email id; use one shown by check_email.")
+    return message_id
+
+
 def read(ctx: Context, message_id: str) -> dict[str, str]:
+    _check_id(message_id)
     msg = _api(ctx, "GET", f"/messages/{message_id}", params={"format": "full"})
     h = _headers(msg)
     body = _body(msg.get("payload") or {}).strip()
