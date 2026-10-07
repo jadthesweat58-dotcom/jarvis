@@ -89,20 +89,35 @@ In the Twilio console → Phone Numbers → your number → **Voice → "A call 
 `https://YOUR-JARVIS-URL/twilio/voice` (HTTP POST). Calls from `MY_PHONE_NUMBER` get the full
 Jarvis; anyone else can leave a message, which appears in your feed and notes.
 
-## 3. Run Jarvis on your own computer (later)
+## 3. Run Jarvis on your own computer
 
-1. Install Python 3.11 or newer from https://www.python.org (Windows: tick "Add Python to PATH").
-2. Download/clone this repo.
-3. Start it:
-   - **Windows**: double-click `scripts\start.bat`
-   - **Mac / Linux**: run `./scripts/start.sh` in a terminal
-4. The first run creates a `.env` file. Open it, paste your `GEMINI_API_KEY`, and set
-   `JARVIS_MODE=local` if you want Jarvis to control your computer. To share memories with your
-   cloud Jarvis, also paste the same `DATABASE_URL` (if both run at once, reminders may pop up
-   on both). Run the script again.
-5. Your browser opens `http://localhost:8000`. (On your own computer no access token is needed.)
+1. **Python 3.10 or newer.** Macs come with an older one, so install Python 3.12 from
+   https://www.python.org/downloads/ (Windows: tick "Add python.exe to PATH"). The scripts find
+   it by themselves and tell you if it's missing.
+2. **Get Jarvis:** in Terminal, `git clone https://github.com/jadthesweat58-dotcom/jarvis.git`
+   then `cd jarvis`.
+3. **Start it:** Mac/Linux `./scripts/start.sh` · Windows double-click `scripts\start.bat`.
+   The first run installs everything (a few minutes) and creates a `.env` settings file.
+4. **Fill in `.env`** (it opens by itself on a Mac), then run the script again:
+   ```
+   JARVIS_MODE=local
+   GEMINI_API_KEY=...            (same key as on Render)
+   DATABASE_URL=...              (same as Render, to share memory with your cloud Jarvis)
+   MY_NAME=Jad
+   TIMEZONE=Asia/Dubai
+   HOME_CITY=Dubai
+   ```
+   Add `ELEVENLABS_*`, `TELEGRAM_BOT_TOKEN`, `CALENDAR_ICS_URL` if you use them (copy them from
+   Render → Environment; don't paste them in a chat). Leave Telegram on the cloud Jarvis only.
+5. Your browser opens `http://localhost:8000` (no access token needed on your own computer).
+6. **Mac permissions** (System Settings → Privacy & Security), the first time each is used:
+   **Microphone** (clap, voice), **Screen Recording** (seeing your screen), **Accessibility** and
+   **Automation** (music, brightness, lock, WhatsApp) for Terminal or Python.
+7. **Start at login** (optional): double-click `scripts/autostart.command` (Windows:
+   `scripts\autostart.bat`) for the menu-bar icon with clap-to-open.
 
-Prefer the terminal? `python -m jarvis.cli` gives you a text chat.
+Running both: reminders, routines and the briefings fire only once even when the cloud and local
+Jarvis share the same database. Prefer the terminal? `.venv/bin/python -m jarvis.cli` is a text chat.
 
 ## 4. Talking to Jarvis
 
